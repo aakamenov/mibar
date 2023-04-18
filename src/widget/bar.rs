@@ -10,7 +10,7 @@ use super::{
     music::Music,
     cpu::Cpu,
     ram::Ram,
-    flex::Flex,
+    flex::{Flex, Alignment},
     Widget
 };
 
@@ -34,6 +34,7 @@ impl Bar {
 
         let right = Flex::row()
             .spacing(SPACING)
+            .main_alignment(Alignment::End)
             .with_non_flex(Cpu::default())
             .with_non_flex(Ram::default());
 
