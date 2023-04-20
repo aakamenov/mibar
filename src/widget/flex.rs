@@ -206,11 +206,11 @@ impl Widget for Flex {
         let mut main = match self.main_alignment {
             Alignment::Start => self.padding,
             Alignment::Center => (self.axis.main(bounds.max) -
-                self.spacing -
+                spacing -
                 self.total_main()) /
                 2f32,
             Alignment::End => self.axis.main(bounds.max) -
-                self.spacing -
+                spacing -
                 self.total_main()
         };
 
