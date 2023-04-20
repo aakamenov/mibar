@@ -101,13 +101,6 @@ impl Flex {
             padding: 0f32
         }
     }
-
-    fn total_main(&self) -> f32 {
-        match self.axis {
-            Axis::Horizontal => self.rects.iter().map(|x| x.width).sum(),
-            Axis::Vertical => self.rects.iter().map(|x| x.height).sum()
-        }
-    }
 }
 
 impl Widget for Flex {
@@ -130,6 +123,7 @@ impl Widget for Flex {
 
         let max_cross = self.axis.cross(bounds.max);
         let mut cross = self.axis.cross(bounds.min);
+        let mut total_main = 0f32;
 
         let mut available = self.axis.main(bounds.max) - spacing;
         let mut total_flex = 0f32;
@@ -149,8 +143,11 @@ impl Widget for Flex {
             );
 
             let size = child.layout(widget_bounds);
-            available -= self.axis.main(size);
-            cross = cross.max(self.axis.cross(size));
+
+            let main_cross = self.axis.main_and_cross_size(size);
+            available -= main_cross.0;
+            total_main += main_cross.0;
+            cross = cross.max(main_cross.1);
 
             self.rects[i] = Rect {
                 x: 0f32,
@@ -192,7 +189,10 @@ impl Widget for Flex {
                 );
 
                 let size = child.layout(widget_bounds);
-                cross = cross.max(self.axis.cross(size));
+
+                let main_cross = self.axis.main_and_cross_size(size);
+                total_main += main_cross.0;
+                cross = cross.max(main_cross.1);
 
                 self.rects[i] = Rect {
                     x: 0f32,
@@ -207,11 +207,11 @@ impl Widget for Flex {
             Alignment::Start => self.padding,
             Alignment::Center => (self.axis.main(bounds.max) -
                 spacing -
-                self.total_main()) /
+                total_main) /
                 2f32,
             Alignment::End => self.axis.main(bounds.max) -
                 spacing -
-                self.total_main()
+                total_main
         };
 
         // Position children
@@ -265,6 +265,14 @@ impl Axis {
         match self {
             Self::Horizontal => size.height,
             Self::Vertical => size.width
+        }
+    }
+
+    #[inline]
+    pub fn main_and_cross_size(&self, size: Size) -> (f32, f32) {
+        match self {
+            Self::Horizontal => (size.width, size.height),
+            Self::Vertical => (size.height, size.width)
         }
     }
 
