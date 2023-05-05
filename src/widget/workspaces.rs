@@ -3,7 +3,7 @@ use tiny_skia::Color;
 use crate::{
     geometry::{Size, Circle},
     positioner::Positioner,
-    ui::DrawCtx
+    ui::{DrawCtx, LayoutCtx}
 };
 use super::{
     size_constraints::SizeConstraints,
@@ -25,7 +25,7 @@ impl Workspaces {
 }
 
 impl Widget for Workspaces {
-    fn layout(&mut self, bounds: SizeConstraints) -> Size {
+    fn layout(&mut self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
         let diameter = self.radius * 2f32;
         let diameter = diameter.clamp(bounds.min.height, bounds.max.height);
         self.radius = diameter / 2f32;

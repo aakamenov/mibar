@@ -3,6 +3,8 @@ mod geometry;
 mod widget;
 mod theme;
 mod positioner;
+mod renderer;
+mod bar;
 
 use smithay_client_toolkit::{
     reexports::client::{
@@ -32,7 +34,6 @@ use tiny_skia::PixmapMut;
 
 use crate::{
     ui::Ui,
-    widget::bar::Bar,
     geometry::Size
 };
 
@@ -75,7 +76,7 @@ fn main() {
         exit: false,
         width: 256,
         height: 256,
-        ui: Ui::new(Box::new(Bar::new()))
+        ui: Ui::new(bar::build)
     };
 
     // We don't draw immediately, the configure will notify us when to first draw.

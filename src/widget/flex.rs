@@ -1,7 +1,7 @@
 use crate::{
     geometry::{Size, Rect},
     positioner::Positioner,
-    ui::DrawCtx
+    ui::{DrawCtx, LayoutCtx, Id}
 };
 use super::{
     size_constraints::SizeConstraints,
@@ -9,7 +9,7 @@ use super::{
 };
 
 pub struct Flex {
-    children: Vec<(Box<dyn Widget>, f32)>,
+    children: Vec<(Id, f32)>,
     rects: Vec<Rect>,
     axis: Axis,
     main_alignment: Alignment,
@@ -73,7 +73,7 @@ impl Flex {
     #[inline]
     pub fn with_non_flex(
         self,
-        child: impl Widget + 'static
+        child: Id
     ) -> Self {
         self.with_flex(child, 0f32)
     }
@@ -81,10 +81,10 @@ impl Flex {
     #[inline]
     pub fn with_flex(
         mut self,
-        child: impl Widget + 'static,
+        child: Id,
         flex: f32
     ) -> Self {
-        self.children.push((Box::new(child), flex));
+        self.children.push((child, flex));
 
         self
     }
@@ -106,7 +106,7 @@ impl Flex {
 impl Widget for Flex {
     // Simplified version of the Flutter flex layout algorithm:
     // https://api.flutter.dev/flutter/widgets/Flex-class.html
-    fn layout(&mut self, bounds: SizeConstraints) -> Size {
+    fn layout(&mut self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
         let total_len = self.children.len();
 
         self.rects.clear();
@@ -129,7 +129,7 @@ impl Widget for Flex {
         let mut total_flex = 0f32;
 
         // Layout non-flex children first i.e those with flex factor == 0
-        for (i, (child, flex)) in self.children.iter_mut().enumerate() {
+        for (i, (child, flex)) in self.children.iter().enumerate() {
             total_flex += *flex;
 
             if flex.abs() > 0f32 {
@@ -142,7 +142,7 @@ impl Widget for Flex {
                 Size::new(width, height)
             );
 
-            let size = child.layout(widget_bounds);
+            let size = ctx.layout(child, widget_bounds);
 
             let main_cross = self.axis.main_and_cross_size(size);
             available -= main_cross.0;
@@ -161,7 +161,7 @@ impl Widget for Flex {
             let available = available.max(0f32);
 
             // Layout flex children i.e those with flex factor > 0
-            for (i, (child, flex)) in self.children.iter_mut().enumerate() {
+            for (i, (child, flex)) in self.children.iter().enumerate() {
                 if *flex <= 0f32 {
                     continue;
                 }
@@ -188,7 +188,7 @@ impl Widget for Flex {
                     Size::new(max_width, max_height)
                 );
 
-                let size = child.layout(widget_bounds);
+                let size = ctx.layout(child, widget_bounds);
 
                 let main_cross = self.axis.main_and_cross_size(size);
                 total_main += main_cross.0;
@@ -235,10 +235,10 @@ impl Widget for Flex {
     }
 
     fn draw(&mut self, ctx: &mut DrawCtx, positioner: Positioner) {
-        for (i, (child, _)) in self.children.iter_mut().enumerate() {
+        for (i, (child, _)) in self.children.iter().enumerate() {
             let positioner = positioner.next(self.rects[i]);
 
-            child.draw(ctx, positioner);
+            ctx.draw(child, positioner);
         }
     }
 }
@@ -295,7 +295,7 @@ impl Alignment {
         match self {
             Self::Start => { }
             Self::Center => *value += (space - size) / 2f32,
-            Self::End =>  *value += space - size
+            Self::End => *value += space - size
         }
     }
 }

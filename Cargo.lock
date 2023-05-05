@@ -182,6 +182,7 @@ dependencies = [
 name = "mibar"
 version = "0.1.0"
 dependencies = [
+ "nohash",
  "smithay-client-toolkit",
  "tiny-skia",
 ]
@@ -226,6 +227,12 @@ dependencies = [
  "memoffset 0.7.1",
  "static_assertions",
 ]
+
+[[package]]
+name = "nohash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0f889fb66f7acdf83442c35775764b51fed3c606ab9cee51500dbde2cf528ca"
 
 [[package]]
 name = "nom"
@@ -305,8 +312,9 @@ checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 
 [[package]]
 name = "smithay-client-toolkit"
-version = "0.16.0"
-source = "git+https://github.com/Smithay/client-toolkit?rev=2982ef1#2982ef16bfe69fd5342eb79eb0d8f8ab32e4dd78"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1476c3d89bb67079264b88aaf4f14358353318397e083b7c4e8c14517f55de7"
 dependencies = [
  "bitflags",
  "calloop",

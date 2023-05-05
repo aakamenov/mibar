@@ -1,7 +1,7 @@
 use crate::{
     geometry::Size,
     positioner::Positioner,
-    ui::DrawCtx
+    ui::{DrawCtx, LayoutCtx}
 };
 use super::{
     size_constraints::SizeConstraints,
@@ -14,11 +14,11 @@ pub struct DateTime {
 }
 
 impl Widget for DateTime {
-    fn layout(&mut self, bounds: SizeConstraints) -> Size {
+    fn layout(&mut self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
         bounds.constrain(Size { width: 100f32, height: 20f32 })
     }
 
     fn draw(&mut self, ctx: &mut DrawCtx, positioner: Positioner) {
-        ctx.fill_rect(positioner.bounds, ctx.theme.warm1);
+        ctx.fill_rect(positioner.bounds, ctx.ui.theme.warm1);
     }
 }

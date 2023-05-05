@@ -11,7 +11,7 @@ pub struct SizeConstraints {
 impl SizeConstraints {
     pub const UNBOUNDED: Self = Self {
         min: Size::ZERO,
-        max: Size::new(f32::INFINITY, f32::INFINITY),
+        max: Size::new(f32::INFINITY, f32::INFINITY)
     };
 
     #[inline]
