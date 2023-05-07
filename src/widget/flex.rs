@@ -1,6 +1,5 @@
 use crate::{
     geometry::{Size, Rect},
-    positioner::Positioner,
     ui::{DrawCtx, LayoutCtx, Id}
 };
 use super::{
@@ -10,7 +9,6 @@ use super::{
 
 pub struct Flex {
     children: Vec<(Id, f32)>,
-    rects: Vec<Rect>,
     axis: Axis,
     main_alignment: Alignment,
     cross_alignment: Alignment,
@@ -93,7 +91,6 @@ impl Flex {
     fn new(axis: Axis) -> Self {
         Self {
             children: Vec::new(),
-            rects: Vec::new(),
             axis,
             main_alignment: Alignment::Start,
             cross_alignment: Alignment::Center,
@@ -107,29 +104,21 @@ impl Widget for Flex {
     // Simplified version of the Flutter flex layout algorithm:
     // https://api.flutter.dev/flutter/widgets/Flex-class.html
     fn layout(&mut self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
-        let total_len = self.children.len();
-
-        self.rects.clear();
-        self.rects.reserve(total_len);
-
-        unsafe {
-            self.rects.set_len(total_len);
-        }
-
-        let bounds = bounds.shrink(
+        let layout_bounds = bounds.shrink(
             Size::new(self.padding * 2f32, self.padding * 2f32)
         );
-        let spacing = self.spacing * total_len.saturating_sub(1) as f32;
+        let spacing = self.spacing *
+            self.children.len().saturating_sub(1) as f32;
 
-        let max_cross = self.axis.cross(bounds.max);
-        let mut cross = self.axis.cross(bounds.min);
+        let max_cross = self.axis.cross(layout_bounds.max);
+        let mut cross = self.axis.cross(layout_bounds.min);
         let mut total_main = 0f32;
 
-        let mut available = self.axis.main(bounds.max) - spacing;
+        let mut available = self.axis.main(layout_bounds.max) - spacing;
         let mut total_flex = 0f32;
 
         // Layout non-flex children first i.e those with flex factor == 0
-        for (i, (child, flex)) in self.children.iter().enumerate() {
+        for (child, flex) in &self.children {
             total_flex += *flex;
 
             if flex.abs() > 0f32 {
@@ -148,20 +137,13 @@ impl Widget for Flex {
             available -= main_cross.0;
             total_main += main_cross.0;
             cross = cross.max(main_cross.1);
-
-            self.rects[i] = Rect {
-                x: 0f32,
-                y: 0f32,
-                width: size.width,
-                height: size.height
-            };
         }
 
         if total_flex > 0f32 {
             let available = available.max(0f32);
 
             // Layout flex children i.e those with flex factor > 0
-            for (i, (child, flex)) in self.children.iter().enumerate() {
+            for (child, flex) in &self.children {
                 if *flex <= 0f32 {
                     continue;
                 }
@@ -175,7 +157,7 @@ impl Widget for Flex {
 
                 let (min_width, min_height) = self.axis.main_and_cross(
                     min_main,
-                    self.axis.cross(bounds.min)
+                    self.axis.cross(layout_bounds.min)
                 );
 
                 let (max_width, max_height) = self.axis.main_and_cross(
@@ -193,36 +175,30 @@ impl Widget for Flex {
                 let main_cross = self.axis.main_and_cross_size(size);
                 total_main += main_cross.0;
                 cross = cross.max(main_cross.1);
-
-                self.rects[i] = Rect {
-                    x: 0f32,
-                    y: 0f32,
-                    width: size.width,
-                    height: size.height
-                };
             }
         }
 
         let mut main = match self.main_alignment {
             Alignment::Start => self.padding,
-            Alignment::Center => (self.axis.main(bounds.max) -
+            Alignment::Center => (self.axis.main(layout_bounds.max) -
                 spacing -
                 total_main) /
                 2f32,
-            Alignment::End => self.axis.main(bounds.max) -
+            Alignment::End => self.axis.main(layout_bounds.max) -
                 spacing -
                 total_main
         };
 
         // Position children
-        for (i, rect) in self.rects.iter_mut().enumerate() {
+        for (i, (child, _)) in self.children.iter().enumerate() {
             if i > 0 {
                 main += self.spacing;
             }
 
-            let (x, y) = self.axis.main_and_cross(main, self.padding);
-            rect.x = x;
-            rect.y = y;
+            let origin = self.axis.main_and_cross(main, self.padding);
+
+            let rect = ctx.layout_of(child);
+            rect.set_origin(origin);
 
             self.cross_alignment.align(rect, cross, self.axis.flip());
 
@@ -230,15 +206,17 @@ impl Widget for Flex {
         }
 
         let (width, height) = self.axis.main_and_cross(main - self.padding, cross);
-        
-        bounds.constrain(Size::new(width, height))
+        let size = layout_bounds.constrain(Size::new(width, height));
+
+        Size::new(
+            size.width + (self.padding * 2f32),
+            size.height + (self.padding * 2f32)
+        )
     }
 
-    fn draw(&mut self, ctx: &mut DrawCtx, positioner: Positioner) {
-        for (i, (child, _)) in self.children.iter().enumerate() {
-            let positioner = positioner.next(self.rects[i]);
-
-            ctx.draw(child, positioner);
+    fn draw(&mut self, ctx: &mut DrawCtx) {
+        for (child, _) in &self.children {
+            ctx.draw(child);
         }
     }
 }

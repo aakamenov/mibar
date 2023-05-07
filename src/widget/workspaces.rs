@@ -2,7 +2,6 @@ use tiny_skia::Color;
 
 use crate::{
     geometry::{Size, Circle},
-    positioner::Positioner,
     ui::{DrawCtx, LayoutCtx}
 };
 use super::{
@@ -41,10 +40,10 @@ impl Widget for Workspaces {
         size
     }
 
-    fn draw(&mut self, ctx: &mut DrawCtx, positioner: Positioner) {
-        let bounds = positioner.bounds;
-        let y = bounds.y + self.radius;
-        let mut x = bounds.x + self.radius;
+    fn draw(&mut self, ctx: &mut DrawCtx) {
+        let layout = ctx.layout();
+        let y = layout.y + self.radius;
+        let mut x = layout.x + self.radius;
 
         for _ in 0..WORKSPACE_COUNT {
             let circle = Circle { x, y, radius: self.radius };

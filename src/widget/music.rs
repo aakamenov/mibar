@@ -1,6 +1,5 @@
 use crate::{
     geometry::Size,
-    positioner::Positioner,
     ui::{DrawCtx, LayoutCtx}
 };
 use super::{
@@ -18,7 +17,7 @@ impl Widget for Music {
         bounds.constrain(Size { width: bounds.max.width, height: 20f32 })
     }
 
-    fn draw(&mut self, ctx: &mut DrawCtx, positioner: Positioner) {
-        ctx.fill_rect(positioner.bounds, ctx.ui.theme.warm2);
+    fn draw(&mut self, ctx: &mut DrawCtx) {
+        ctx.fill_rect(ctx.layout(), ctx.ui.theme.warm2);
     }
 }

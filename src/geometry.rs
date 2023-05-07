@@ -67,15 +67,17 @@ impl Rect {
         Size { width: self.width, height: self.height }
     }
 
-    #[must_use]
     #[inline]
-    pub fn translate_x(&self, amount: f32) -> Rect {
-        Self {
-            x: self.x + amount,
-            y: self.y,
-            width: self.width,
-            height: self.height
-        }
+    pub fn set_origin(&mut self, point: impl Into<Point>) {
+        let point = point.into();
+
+        self.x = point.x;
+        self.y = point.y;
+    }
+
+    #[inline]
+    pub fn origin(&self) -> Point {
+        Point::new(self.x, self.y)
     }
 
     #[must_use]
@@ -114,5 +116,11 @@ impl FloatExt for f32 {
     #[inline]
     fn expand(&self) -> f32 {
         self.abs().ceil().copysign(*self)
+    }
+}
+
+impl From<(f32, f32)> for Point {
+    fn from(point: (f32, f32)) -> Self {
+        Self { x: point.0, y: point.1 }
     }
 }

@@ -2,8 +2,7 @@ use tiny_skia::{PixmapMut, PathBuilder};
 use nohash::IntMap;
 
 use crate::{
-    geometry::{Rect, Circle, Size},
-    positioner::Positioner,
+    geometry::{Rect, Point, Circle, Size},
     widget::{
         Widget,
         size_constraints::SizeConstraints
@@ -25,7 +24,7 @@ pub struct Id(WidgetId);
 
 pub struct UiCtx {
     pub theme: Theme,
-    widgets: IntMap<WidgetId, Box<dyn Widget>>,
+    widgets: IntMap<WidgetId, WidgetState>,
     id_counter: u64
 }
 
@@ -33,9 +32,15 @@ pub struct LayoutCtx<'a> {
     ui: &'a mut UiCtx
 }
 
-pub struct DrawCtx<'a> {
+pub struct DrawCtx<'a, 'b> {
     pub ui: &'a mut UiCtx,
-    renderer: Renderer<'a>
+    renderer: &'a mut Renderer<'b>,
+    layout: Rect
+}
+
+struct WidgetState {
+    widget: Box<dyn Widget>,
+    layout: Rect
 }
 
 impl Ui {
@@ -64,7 +69,6 @@ impl Ui {
             ui: &mut self.ctx  
         };
 
-
         ctx.layout(&self.root, SizeConstraints::tight(size));
     }
 
@@ -74,23 +78,27 @@ impl Ui {
 
         pixmap.fill(self.ctx.theme.base);
 
-        let mut ctx = DrawCtx {
-            ui: &mut self.ctx,
-            renderer: Renderer {
-                pixmap,
-                builder: PathBuilder::new(),
-                clip_stack: Vec::new()
-            }
+        let mut renderer = Renderer {
+            pixmap,
+            builder: PathBuilder::new(),
+            clip_stack: Vec::new()
         };
 
-        ctx.draw(&self.root, Positioner::new(self.size));
+        let mut ctx = DrawCtx {
+            ui: &mut self.ctx,
+            layout: Rect::default(),
+            renderer: &mut renderer
+        };
+
+        ctx.draw(&self.root);
     }
 }
 
 impl UiCtx {
     #[inline]
     pub fn alloc(&mut self, widget: impl Widget + 'static) -> Id {
-        self.widgets.insert(self.id_counter, Box::new(widget));
+        let state = WidgetState::new(Box::new(widget));
+        self.widgets.insert(self.id_counter, state);
 
         let id = Id(self.id_counter);
         self.id_counter += 1;
@@ -107,26 +115,54 @@ impl UiCtx {
 impl<'a> LayoutCtx<'a> {
     #[inline]
     pub fn layout(&mut self, id: &Id, bounds: SizeConstraints) -> Size {
-        let widget = self.ui.widgets.get_mut(&id.0)
-            .unwrap()
-            .as_mut() as *mut dyn Widget;
+        let state = self.ui.widgets.get_mut(&id.0)
+            .unwrap() as *mut WidgetState;
 
         unsafe {
-            (*widget).layout(self, bounds)
+            let state = &mut (*state);
+
+            let size = state.widget.layout(self, bounds);
+            state.layout.set_size(size);
+
+            size
         }
+    }
+
+    #[inline]
+    pub fn set_origin(&mut self, id: &Id, point: impl Into<Point>) {
+        let state = self.ui.widgets.get_mut(&id.0).unwrap();
+        state.layout.set_origin(point);
+    }
+
+    #[inline]
+    pub fn layout_of(&mut self, id: &Id) -> &mut Rect {
+        &mut self.ui.widgets.get_mut(&id.0).unwrap().layout
     }
 }
 
-impl<'a> DrawCtx<'a> {
+impl<'a, 'b> DrawCtx<'a, 'b> {
     #[inline]
-    pub fn draw(&mut self, id: &Id, positioner: Positioner) {
-        let widget = self.ui.widgets.get_mut(&id.0)
-            .unwrap()
-            .as_mut() as *mut dyn Widget;
+    pub fn draw(&mut self, id: &Id) {
+        let state = self.ui.widgets.get_mut(&id.0)
+            .unwrap() as *mut WidgetState;
 
         unsafe {
-            (*widget).draw(self, positioner);
+            let state = &mut (*state);
+            state.layout.x += self.layout.x;
+            state.layout.y += self.layout.y;
+
+            let prev = self.layout;
+            self.layout = state.layout;
+
+            state.widget.draw(self);
+
+            self.layout = prev;
         }
+    }
+
+    #[inline]
+    pub fn layout(&self) -> Rect {
+        self.layout
     }
 
     #[inline]
@@ -150,5 +186,14 @@ impl<'a> DrawCtx<'a> {
     #[inline]
     pub fn pop_clip(&mut self) {
         self.renderer.clip_stack.pop();
+    }
+}
+
+impl WidgetState {
+    fn new(widget: Box<dyn Widget>) -> Self {
+        Self {
+            widget,
+            layout: Rect::default()
+        }
     }
 }

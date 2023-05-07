@@ -1,6 +1,5 @@
 use crate::{
     geometry::Size,
-    positioner::Positioner,
     ui::{DrawCtx, LayoutCtx}
 };
 use super::{
@@ -18,7 +17,7 @@ impl Widget for Ram {
         bounds.constrain(Size { width: 100f32, height: 20f32 })
     }
 
-    fn draw(&mut self, ctx: &mut DrawCtx, positioner: Positioner) {
-        ctx.fill_rect(positioner.bounds, ctx.ui.theme.cold3);
+    fn draw(&mut self, ctx: &mut DrawCtx) {
+        ctx.fill_rect(ctx.layout(), ctx.ui.theme.cold3);
     }
 }

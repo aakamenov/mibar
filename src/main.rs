@@ -2,7 +2,6 @@ mod ui;
 mod geometry;
 mod widget;
 mod theme;
-mod positioner;
 mod renderer;
 mod bar;
 
