@@ -14,6 +14,7 @@ use crate::{
 type WidgetId = u64;
 
 pub struct Ui {
+    pub(crate) needs_redraw: bool,
     ctx: UiCtx,
     root: Id,
     size: Size
@@ -56,6 +57,7 @@ impl Ui {
         let root = builder(&mut ctx);
 
         Self {
+            needs_redraw: false,
             root,
             ctx,
             size: Size::ZERO
@@ -63,6 +65,10 @@ impl Ui {
     }
 
     pub fn layout(&mut self, size: Size) {
+        if size == self.size {
+            return;
+        }
+
         self.size = size;
 
         let mut ctx = LayoutCtx {
@@ -70,6 +76,7 @@ impl Ui {
         };
 
         ctx.layout(&self.root, SizeConstraints::tight(size));
+        self.needs_redraw = true;
     }
 
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
@@ -91,6 +98,7 @@ impl Ui {
         };
 
         ctx.draw(&self.root);
+        self.needs_redraw = false;
     }
 }
 
