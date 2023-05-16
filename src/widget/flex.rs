@@ -1,6 +1,6 @@
 use crate::{
     geometry::{Size, Rect},
-    ui::{DrawCtx, LayoutCtx, Id}
+    ui::{DrawCtx, LayoutCtx, UpdateCtx, Event, Id}
 };
 use super::{
     size_constraints::SizeConstraints,
@@ -197,10 +197,10 @@ impl Widget for Flex {
 
             let origin = self.axis.main_and_cross(main, self.padding);
 
-            let rect = ctx.layout_of(child);
-            rect.set_origin(origin);
-
-            self.cross_alignment.align(rect, cross, self.axis.flip());
+            let rect = ctx.position(child, |rect| {
+                rect.set_origin(origin);
+                self.cross_alignment.align(rect, cross, self.axis.flip());
+            });
 
             main += self.axis.main(rect.size());
         }
@@ -217,6 +217,12 @@ impl Widget for Flex {
     fn draw(&mut self, ctx: &mut DrawCtx) {
         for (child, _) in &self.children {
             ctx.draw(child);
+        }
+    }
+
+    fn event(&mut self, ctx: &mut UpdateCtx, event: &Event) {
+        for (child, _) in &self.children {
+            ctx.event(child, event);
         }
     }
 }

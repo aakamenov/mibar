@@ -15,7 +15,7 @@ use smithay_client_toolkit::{
     registry::{ProvidesRegistryState, RegistryState},
     seat::{
         Capability, SeatHandler, SeatState,
-        pointer::{PointerEvent, PointerHandler},
+        pointer::{PointerEvent, PointerHandler, PointerEventKind},
     },
     shell::{
         wlr_layer::{
@@ -33,9 +33,32 @@ use smithay_client_toolkit::{
     delegate_pointer
 };
 
+use crate::geometry::Point;
+
 #[derive(Debug)]
-pub enum Event {
-    Resize((u32, u32))
+pub enum WaylandEvent {
+    Resize((u32, u32)),
+    Mouse(MouseEvent)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MouseEvent {
+    MousePress {
+        pos: Point,
+        button: MouseButton
+    },
+    MouseRelease {
+        pos: Point,
+        button: MouseButton
+    },
+    MouseMove(Point)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle
 }
 
 pub struct BarWindow {
@@ -54,7 +77,7 @@ struct State {
     buffer: Option<Buffer>,
     shm: Shm,
     size: (u32, u32),
-    pending_events: Vec<Event>
+    pending_events: Vec<WaylandEvent>
 }
 
 impl BarWindow {
@@ -103,7 +126,7 @@ impl BarWindow {
         }
     }
 
-    pub fn events_blocking(&mut self) -> Vec<Event> {
+    pub fn events_blocking(&mut self) -> Vec<WaylandEvent> {
         self.event_queue.blocking_dispatch(&mut self.state).unwrap();
 
         mem::take(&mut self.state.pending_events)
@@ -265,7 +288,7 @@ impl LayerShellHandler for State {
         }
 
         self.size = configure.new_size;
-        self.pending_events.push(Event::Resize(self.size)); 
+        self.pending_events.push(WaylandEvent::Resize(self.size)); 
     }
 }
 
@@ -331,7 +354,42 @@ impl PointerHandler for State {
         events: &[PointerEvent]
     ) {
         for event in events {
-            println!("Pointer event: {:?}", event);
+            let pos = Point::new(
+                event.position.0 as f32,
+                event.position.1 as f32
+            );
+
+            match event.kind {
+                PointerEventKind::Motion { .. } =>
+                    self.pending_events.push(
+                        WaylandEvent::Mouse(
+                            MouseEvent::MouseMove(pos)
+                        )
+                    ),
+                PointerEventKind::Press { button, ..} =>
+                    if let Some(button) = MouseButton::from_code(button) {
+                        self.pending_events.push(
+                            WaylandEvent::Mouse(
+                                MouseEvent::MousePress {
+                                    button,
+                                    pos
+                                }
+                            )
+                        );
+                    }
+                PointerEventKind::Release { button, .. } =>
+                    if let Some(button) = MouseButton::from_code(button) {
+                        self.pending_events.push(
+                            WaylandEvent::Mouse(
+                                MouseEvent::MouseRelease {
+                                    button,
+                                    pos
+                                }
+                            )
+                        );
+                    }
+                _ => { }
+            }
         }
     }
 }
@@ -352,3 +410,15 @@ delegate_xdg_shell!(State);
 delegate_shm!(State);
 delegate_registry!(State);
 delegate_layer!(State);
+
+impl MouseButton {
+    #[inline]
+    fn from_code(code: u32) -> Option<Self> {
+        match code {
+            272 => Some(MouseButton::Left),
+            273 => Some(MouseButton::Right),
+            274 => Some(MouseButton::Middle),
+            _ => None
+        }
+    }
+}

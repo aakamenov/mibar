@@ -9,9 +9,9 @@ mod wayland;
 use tiny_skia::PixmapMut;
 
 use crate::{
-    ui::Ui,
+    ui::{Ui, Event},
     geometry::Size,
-    wayland::{BarWindow, Event}
+    wayland::{BarWindow, WaylandEvent}
 };
 
 fn main() {
@@ -21,16 +21,17 @@ fn main() {
     loop {
         for event in window.events_blocking() {
             match event {
-                Event::Resize(size) => {
+                WaylandEvent::Resize(size) =>
                     ui.layout(Size {
                         width: size.0 as f32,
                         height: size.1 as f32
-                    });
-                }
+                    }),
+                WaylandEvent::Mouse(event) =>
+                    ui.event(Event::Mouse(event))
             }
         }
 
-        if ui.needs_redraw {
+        if ui.needs_redraw() {
             window.canvas(|canvas, size| {
                 let mut pixmap = PixmapMut::from_bytes(
                     canvas,

@@ -1,20 +1,22 @@
+use std::mem;
+
 use tiny_skia::{PixmapMut, PathBuilder};
 use nohash::IntMap;
 
 use crate::{
-    geometry::{Rect, Point, Circle, Size},
+    geometry::{Rect, Circle, Size},
     widget::{
         Widget,
         size_constraints::SizeConstraints
     },
     theme::Theme,
-    renderer::{Renderer, Background}
+    renderer::{Renderer, Background},
+    wayland::MouseEvent
 };
 
 type WidgetId = u64;
 
 pub struct Ui {
-    pub(crate) needs_redraw: bool,
     ctx: UiCtx,
     root: Id,
     size: Size
@@ -26,7 +28,9 @@ pub struct Id(WidgetId);
 pub struct UiCtx {
     pub theme: Theme,
     widgets: IntMap<WidgetId, WidgetState>,
-    id_counter: u64
+    id_counter: u64,
+    needs_redraw: bool,
+    widgets_to_redraw: Vec<WidgetId>
 }
 
 pub struct LayoutCtx<'a> {
@@ -37,6 +41,16 @@ pub struct DrawCtx<'a, 'b> {
     pub ui: &'a mut UiCtx,
     renderer: &'a mut Renderer<'b>,
     layout: Rect
+}
+
+pub struct UpdateCtx<'a> {
+    ui: &'a mut UiCtx,
+    current: WidgetId
+}
+
+#[derive(Debug)]
+pub enum Event {
+    Mouse(MouseEvent)
 }
 
 struct WidgetState {
@@ -51,13 +65,14 @@ impl Ui {
         let mut ctx = UiCtx {
             theme: Theme::light(),
             widgets: IntMap::default(),
-            id_counter: 0
+            id_counter: 0,
+            needs_redraw: false,
+            widgets_to_redraw: Vec::new()
         };
 
         let root = builder(&mut ctx);
 
         Self {
-            needs_redraw: false,
             root,
             ctx,
             size: Size::ZERO
@@ -70,13 +85,22 @@ impl Ui {
         }
 
         self.size = size;
+        self.ctx.needs_redraw = true;
 
         let mut ctx = LayoutCtx {
-            ui: &mut self.ctx  
+            ui: &mut self.ctx
         };
 
         ctx.layout(&self.root, SizeConstraints::tight(size));
-        self.needs_redraw = true;
+    }
+
+    pub fn event(&mut self, event: Event) {
+        let mut ctx = UpdateCtx {
+            ui: &mut self.ctx,
+            current: self.root.0
+        };
+
+        ctx.event(&self.root, &event);
     }
 
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
@@ -84,6 +108,7 @@ impl Ui {
         assert_eq!(pixmap.height() , self.size.height as u32);
 
         pixmap.fill(self.ctx.theme.base);
+        self.ctx.needs_redraw = false;
 
         let mut renderer = Renderer {
             pixmap,
@@ -97,8 +122,24 @@ impl Ui {
             renderer: &mut renderer
         };
 
-        ctx.draw(&self.root);
-        self.needs_redraw = false;
+        if ctx.ui.widgets_to_redraw.len() > 0 {
+            let to_redraw = mem::take(&mut ctx.ui.widgets_to_redraw);
+
+            for widget in to_redraw {
+                if ctx.ui.widgets.contains_key(&widget) {
+                    ctx.draw(&Id(widget));
+                }
+            }
+        } else {
+            // Full re-draw after layout. Since widgets_to_redraw 
+            // cannot be changed during layout we know that it occurred.
+            ctx.draw(&self.root);
+        }
+    }
+
+    #[inline]
+    pub fn needs_redraw(&self) -> bool {
+        self.ctx.needs_redraw
     }
 }
 
@@ -117,6 +158,12 @@ impl UiCtx {
     #[inline]
     pub fn dealloc(&mut self, id: Id) {
         self.widgets.remove(&id.0);
+    }
+
+    #[inline]
+    fn queue_draw(&mut self, id: WidgetId) {
+        self.widgets_to_redraw.push(id);
+        self.needs_redraw = true;
     }
 }
 
@@ -137,14 +184,57 @@ impl<'a> LayoutCtx<'a> {
     }
 
     #[inline]
-    pub fn set_origin(&mut self, id: &Id, point: impl Into<Point>) {
+    pub fn position(
+        &mut self,
+        id: &Id,
+        func: impl FnOnce(&mut Rect)
+    ) -> Rect {
         let state = self.ui.widgets.get_mut(&id.0).unwrap();
-        state.layout.set_origin(point);
+        func(&mut state.layout);
+
+        state.layout
+    }
+}
+
+impl<'a> UpdateCtx<'a> {
+    #[inline]
+    pub fn event(&mut self, id: &Id, event: &Event) {
+        let state = self.ui.widgets.get_mut(&id.0)
+            .unwrap() as *mut WidgetState;
+
+        unsafe {
+            let state = &mut (*state);
+
+            let modified_event = match event {
+                Event::Mouse(mut event) => {
+                    match &mut event {
+                        MouseEvent::MousePress { pos, .. } |
+                        MouseEvent::MouseRelease { pos, .. } |
+                        MouseEvent::MouseMove(pos) => {
+                            let layout = self.layout();
+                            pos.x -= layout.x;
+                            pos.y -= layout.y;
+
+                            Some(Event::Mouse(event))
+                        }
+                    }
+                }
+            };
+
+            let prev = self.current;
+            self.current = id.0;
+
+            state.widget.event(
+                self,
+                modified_event.as_ref().unwrap_or(event)
+            );
+            self.current = prev;
+        }
     }
 
     #[inline]
-    pub fn layout_of(&mut self, id: &Id) -> &mut Rect {
-        &mut self.ui.widgets.get_mut(&id.0).unwrap().layout
+    pub fn layout(&self) -> Rect {
+        self.ui.widgets.get(&self.current).unwrap().layout
     }
 }
 
@@ -156,11 +246,13 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
 
         unsafe {
             let state = &mut (*state);
-            state.layout.x += self.layout.x;
-            state.layout.y += self.layout.y;
+
+            let mut layout = state.layout;
+            layout.x += self.layout.x;
+            layout.y += self.layout.y;
 
             let prev = self.layout;
-            self.layout = state.layout;
+            self.layout = layout;
 
             state.widget.draw(self);
 
@@ -194,6 +286,13 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
     #[inline]
     pub fn pop_clip(&mut self) {
         self.renderer.clip_stack.pop();
+    }
+}
+
+impl<'a> UpdateCtx<'a> {
+    #[inline]
+    pub fn request_redraw(&mut self) {
+        self.ui.queue_draw(self.current);
     }
 }
 
