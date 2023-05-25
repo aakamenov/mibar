@@ -1,5 +1,5 @@
 use crate::{
-    ui::{UiCtx, Id},
+    ui::{InitCtx, Id},
     widget::{
         workspaces::Workspaces,
         date_time::DateTime,
@@ -13,7 +13,7 @@ use crate::{
 const PADDING: f32 = 6f32;
 const SPACING: f32 = 10f32;
 
-pub fn build(ctx: &mut UiCtx) -> Id {
+pub fn build(ctx: &mut InitCtx) -> Id {
     let left = Flex::row()
         .spacing(SPACING)
         .with_non_flex(ctx.alloc(Workspaces::new()))

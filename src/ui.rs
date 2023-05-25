@@ -4,7 +4,7 @@ use tiny_skia::{PixmapMut, PathBuilder};
 use nohash::IntMap;
 
 use crate::{
-    geometry::{Rect, Circle, Size},
+    geometry::{Rect, Circle, Size, Point},
     widget::{
         Widget,
         size_constraints::SizeConstraints
@@ -30,7 +30,10 @@ pub struct UiCtx {
     widgets: IntMap<WidgetId, WidgetState>,
     id_counter: u64,
     needs_redraw: bool,
-    widgets_to_redraw: Vec<WidgetId>
+    needs_layout: bool,
+    widgets_to_redraw: Vec<WidgetId>,
+    parent_to_children: IntMap<WidgetId, Vec<WidgetId>>,
+    child_to_parent: IntMap<WidgetId, WidgetId>
 }
 
 pub struct LayoutCtx<'a> {
@@ -48,10 +51,17 @@ pub struct UpdateCtx<'a> {
     current: WidgetId
 }
 
+pub struct InitCtx<'a> {
+    ui: &'a mut UiCtx
+}
+
 #[derive(Debug)]
 pub enum Event {
     Mouse(MouseEvent)
 }
+
+#[derive(Default, Debug)]
+pub struct ChildWidgets(Vec<WidgetId>);
 
 struct WidgetState {
     widget: Box<dyn Widget>,
@@ -60,17 +70,35 @@ struct WidgetState {
 
 impl Ui {
     pub fn new(
-        builder: impl FnOnce(&mut UiCtx) -> Id
+        builder: impl FnOnce(&mut InitCtx) -> Id
     ) -> Self {
         let mut ctx = UiCtx {
             theme: Theme::light(),
             widgets: IntMap::default(),
             id_counter: 0,
             needs_redraw: false,
-            widgets_to_redraw: Vec::new()
+            needs_layout: false,
+            widgets_to_redraw: Vec::new(),
+            parent_to_children: IntMap::default(),
+            child_to_parent: IntMap::default()
         };
 
-        let root = builder(&mut ctx);
+        let mut init_ctx = InitCtx { ui: &mut ctx };
+        let root = builder(&mut init_ctx);
+
+        // Build the widget tree by walking the children of each widget.
+        let mut stack = vec![root.0];
+
+        while let Some(current) = stack.pop() {
+            let children = ctx.widgets[&current].widget.children().0;
+            stack.extend_from_slice(&children);
+
+            for child in &children {
+                ctx.child_to_parent.insert(*child, current);
+            }
+
+            ctx.parent_to_children.insert(current, children);
+        }
 
         Self {
             root,
@@ -87,11 +115,7 @@ impl Ui {
         self.size = size;
         self.ctx.needs_redraw = true;
 
-        let mut ctx = LayoutCtx {
-            ui: &mut self.ctx
-        };
-
-        ctx.layout(&self.root, SizeConstraints::tight(size));
+        self.layout_impl();
     }
 
     pub fn event(&mut self, event: Event) {
@@ -107,8 +131,12 @@ impl Ui {
         assert_eq!(pixmap.width() , self.size.width as u32);
         assert_eq!(pixmap.height() , self.size.height as u32);
 
+        // TODO: The background should be drawn by the root widget.
         pixmap.fill(self.ctx.theme.base);
-        self.ctx.needs_redraw = false;
+
+        if self.ctx.needs_layout {
+            self.layout_impl();
+        }
 
         let mut renderer = Renderer {
             pixmap,
@@ -122,7 +150,10 @@ impl Ui {
             renderer: &mut renderer
         };
 
-        if ctx.ui.widgets_to_redraw.len() > 0 {
+        if ctx.ui.needs_layout || ctx.ui.widgets_to_redraw.is_empty() {
+            // We do full layout and redraw at the moment if layout was requested.
+            ctx.draw(&self.root);
+        } else {
             let to_redraw = mem::take(&mut ctx.ui.widgets_to_redraw);
 
             for widget in to_redraw {
@@ -130,23 +161,77 @@ impl Ui {
                     ctx.draw(&Id(widget));
                 }
             }
-        } else {
-            // Full re-draw after layout. Since widgets_to_redraw 
-            // cannot be changed during layout we know that it occurred.
-            ctx.draw(&self.root);
         }
+
+        self.ctx.needs_redraw = false;
+        self.ctx.needs_layout = false;
     }
 
     #[inline]
     pub fn needs_redraw(&self) -> bool {
         self.ctx.needs_redraw
     }
+
+    fn layout_impl(&mut self) {
+        let mut ctx = LayoutCtx {
+            ui: &mut self.ctx
+        };
+
+        ctx.layout(&self.root, SizeConstraints::tight(self.size));
+
+        // Translate all widget positions from parent local space
+        // to window space. This feels like a giant hack but enables
+        // granular redrawing as otherwise the only way to translate
+        // to window space during draw would be to walk the widget
+        // tree for EACH widget that is to be redrawn. So we do this
+        // only once here instead.
+        //
+        // Is there a better way to do this?
+        let mut offset = Point::ZERO;
+
+        let mut stack = Vec::with_capacity(
+            self.ctx.parent_to_children.len()
+        );
+        stack.push(self.root.0);
+
+        while let Some(current) = stack.pop() {
+            let children = &self.ctx.parent_to_children[&current];
+            stack.extend(children);
+
+            offset = self.ctx.widgets[&current].layout.origin();
+            
+            for child in children {
+                let state = self.ctx.widgets.get_mut(child).unwrap();
+    
+                state.layout.x += offset.x;
+                state.layout.y += offset.y;
+            }
+        }
+    }
 }
 
 impl UiCtx {
-    #[inline]
-    pub fn alloc(&mut self, widget: impl Widget + 'static) -> Id {
-        let state = WidgetState::new(Box::new(widget));
+    fn alloc_with_parent(
+        &mut self,
+        widget: Box<dyn Widget>,
+        parent: WidgetId
+    ) -> Id {
+        let id = self.alloc(widget);
+
+        self.child_to_parent.insert(id.0, parent);
+        self.parent_to_children
+            .entry(parent)
+            .or_insert_with(|| Vec::new())
+            .push(id.0);
+
+        id
+    }
+
+    fn alloc(
+        &mut self,
+        widget: Box<dyn Widget>
+    ) -> Id {
+        let state = WidgetState::new(widget);
         self.widgets.insert(self.id_counter, state);
 
         let id = Id(self.id_counter);
@@ -155,9 +240,17 @@ impl UiCtx {
         id
     }
 
-    #[inline]
-    pub fn dealloc(&mut self, id: Id) {
+    fn dealloc(&mut self, id: Id) {
         self.widgets.remove(&id.0);
+        self.child_to_parent.remove(&id.0);
+
+        let children = self.parent_to_children
+            .remove(&id.0)
+            .unwrap_or(Vec::new());
+
+        for child in children {
+            self.dealloc(Id(child));
+        }
     }
 
     #[inline]
@@ -175,6 +268,7 @@ impl<'a> LayoutCtx<'a> {
 
         unsafe {
             let state = &mut (*state);
+            state.layout = Rect::default();
 
             let size = state.widget.layout(self, bounds);
             state.layout.set_size(size);
@@ -205,29 +299,11 @@ impl<'a> UpdateCtx<'a> {
         unsafe {
             let state = &mut (*state);
 
-            let modified_event = match event {
-                Event::Mouse(mut event) => {
-                    match &mut event {
-                        MouseEvent::MousePress { pos, .. } |
-                        MouseEvent::MouseRelease { pos, .. } |
-                        MouseEvent::MouseMove(pos) => {
-                            let layout = self.layout();
-                            pos.x -= layout.x;
-                            pos.y -= layout.y;
-
-                            Some(Event::Mouse(event))
-                        }
-                    }
-                }
-            };
-
             let prev = self.current;
             self.current = id.0;
 
-            state.widget.event(
-                self,
-                modified_event.as_ref().unwrap_or(event)
-            );
+            // Can't use "state" after this as the map might have been resized.
+            state.widget.event(self, event);
             self.current = prev;
         }
     }
@@ -235,6 +311,34 @@ impl<'a> UpdateCtx<'a> {
     #[inline]
     pub fn layout(&self) -> Rect {
         self.ui.widgets.get(&self.current).unwrap().layout
+    }
+
+    #[inline]
+    pub fn alloc(&mut self, widget: impl Widget + 'static) -> Id {
+        self.request_layout();
+
+        self.ui.alloc_with_parent(Box::new(widget), self.current)
+    }
+
+    #[inline]
+    pub fn dealloc(&mut self, id: Id) {
+        self.request_layout();
+        self.ui.dealloc(id);
+    }
+
+    #[inline]
+    pub fn request_redraw(&mut self) {
+        // If layout was requested we layout and
+        // then redraw all widgets currently.
+        if !self.ui.needs_layout {
+            self.ui.queue_draw(self.current);
+        }
+    }
+
+    pub fn request_layout(&mut self) {
+        self.ui.needs_layout = true;
+        self.ui.needs_redraw = true;
+        self.ui.widgets_to_redraw.clear();
     }
 }
 
@@ -247,12 +351,8 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
         unsafe {
             let state = &mut (*state);
 
-            let mut layout = state.layout;
-            layout.x += self.layout.x;
-            layout.y += self.layout.y;
-
             let prev = self.layout;
-            self.layout = layout;
+            self.layout = state.layout;
 
             state.widget.draw(self);
 
@@ -269,7 +369,6 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
     pub fn fill_circle(&mut self, circle: Circle, bg: impl Into<Background>) {
         self.renderer.builder.push_circle(circle.x, circle.y, circle.radius);
         self.renderer.draw_path(bg);
-
     }
 
     #[inline]
@@ -280,7 +379,7 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
 
     #[inline]
     pub fn push_clip(&mut self, rect: Rect) {
-        self.renderer.clip_stack.push(rect)
+        self.renderer.clip_stack.push(rect);
     }
 
     #[inline]
@@ -289,18 +388,35 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
     }
 }
 
-impl<'a> UpdateCtx<'a> {
+impl<'a> InitCtx<'a> {
     #[inline]
-    pub fn request_redraw(&mut self) {
-        self.ui.queue_draw(self.current);
+    pub fn alloc(&mut self, widget: impl Widget + 'static) -> Id {
+        self.ui.alloc(Box::new(widget))
     }
 }
 
 impl WidgetState {
+    #[inline]
     fn new(widget: Box<dyn Widget>) -> Self {
         Self {
             widget,
             layout: Rect::default()
         }
+    }
+}
+
+impl ChildWidgets {
+    #[inline]
+    pub fn from_iter<'a>(
+        children: impl Iterator<Item = &'a Id>
+    ) -> Self {
+        Self(Vec::from_iter(children.map(|x| x.0)))
+    }
+}
+
+impl From<&Id> for ChildWidgets {
+    #[inline]
+    fn from(value: &Id) -> Self {
+        Self(vec![value.0])
     }
 }

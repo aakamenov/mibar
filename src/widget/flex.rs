@@ -1,6 +1,9 @@
 use crate::{
     geometry::{Size, Rect},
-    ui::{DrawCtx, LayoutCtx, UpdateCtx, Event, Id}
+    ui::{
+        DrawCtx, LayoutCtx, UpdateCtx,
+        Event, Id, ChildWidgets
+    }
 };
 use super::{
     size_constraints::SizeConstraints,
@@ -101,6 +104,12 @@ impl Flex {
 }
 
 impl Widget for Flex {
+    fn children(&self) -> ChildWidgets {
+        let iter = self.children.iter().map(|x| &x.0);
+
+        ChildWidgets::from_iter(iter)
+    }
+
     // Simplified version of the Flutter flex layout algorithm:
     // https://api.flutter.dev/flutter/widgets/Flex-class.html
     fn layout(&mut self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
