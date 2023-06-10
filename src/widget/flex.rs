@@ -1,8 +1,8 @@
 use crate::{
     geometry::{Size, Rect},
     ui::{
-        DrawCtx, LayoutCtx, UpdateCtx,
-        Event, Id, ChildWidgets
+        InitCtx,DrawCtx, LayoutCtx,
+        UpdateCtx, Event, Id
     }
 };
 use super::{
@@ -104,10 +104,10 @@ impl Flex {
 }
 
 impl Widget for Flex {
-    fn children(&self) -> ChildWidgets {
-        let iter = self.children.iter().map(|x| &x.0);
-
-        ChildWidgets::from_iter(iter)
+    fn init(&mut self, ctx: &mut InitCtx) {
+        for (child, _) in self.children.iter() {
+            ctx.init(child);
+        }
     }
 
     // Simplified version of the Flutter flex layout algorithm:

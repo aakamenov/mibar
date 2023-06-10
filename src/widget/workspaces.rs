@@ -1,8 +1,17 @@
+use std::env::{self, VarError};
+
 use tiny_skia::Color;
+use tokio::{
+    net::UnixStream,
+    io::AsyncReadExt
+};
 
 use crate::{
     geometry::{Size, Circle},
-    ui::{DrawCtx, LayoutCtx}
+    ui::{
+        InitCtx, DrawCtx, LayoutCtx,
+        UpdateCtx, Event, ValueSender
+    }
 };
 use super::{
     size_constraints::SizeConstraints,
@@ -12,6 +21,8 @@ use super::{
 const WORKSPACE_COUNT: usize = 8;
 const RADIUS: f32 = 8f32;
 const SPACING: f32 = 3f32;
+
+type WorkspaceNum = u8;
 
 pub struct Workspaces {
     radius: f32
@@ -24,7 +35,80 @@ impl Workspaces {
 }
 
 impl Widget for Workspaces {
-    fn layout(&mut self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+    fn init(&mut self, ctx: &mut InitCtx) {
+        let Some(socket) = hyprland_socket() else {
+            return;
+        };
+        
+        ctx.task_with_sender(|sender: ValueSender<WorkspaceNum>| {
+            async move {
+                let mut stream = match UnixStream::connect(socket).await {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        eprintln!("Error opening Hyprland socket: {err}");
+                        return;
+                    }
+                };
+
+                let mut retries = 0;
+
+                loop {
+                    let mut buf = [0; 1024];
+
+                    let read = match stream.read(&mut buf).await {
+                        Ok(read) => {
+                            retries = 0;
+
+                            read
+                        },
+                        Err(err) => {
+                            retries += 1;
+                            eprintln!("Error while reading from Hyprland socket: {err}");
+                            
+                            if retries == 3 {
+                                eprintln!("Closing listener...");
+                                break;
+                            }
+
+                            continue;
+                        }
+                    };
+
+                    let text = unsafe {
+                        std::str::from_utf8_unchecked(&buf[..read])
+                    };
+
+                    const WORKSPACE: &str = "workspace>>";
+
+                    if let Some(index) = text.find(WORKSPACE) {
+                        let (_, num_start) = text.split_at(index + WORKSPACE.len());
+
+                        // There should always be a new line.
+                        let Some(new_line) = num_start.find('\n') else {
+                            eprintln!("Missing new line in hyprland output.");
+
+                            continue;
+                        };
+
+                        let (num, _) = num_start.split_at(new_line);
+                        match num.parse() {
+                            Ok(workspace) => sender.send(workspace).await,
+                            Err(_) => eprintln!("Error parsing workspace number. Hyprland output:\n{text}")
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    fn event(&mut self, ctx: &mut UpdateCtx, event: &Event) {
+        if let Event::TaskResult(workspace) = event {
+            let workspace = workspace.downcast_ref::<WorkspaceNum>().unwrap();
+            println!("Changed to workspace: {workspace}");
+        }
+    }
+
+    fn layout(&mut self, _ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
         let diameter = self.radius * 2f32;
         let diameter = diameter.clamp(bounds.min.height, bounds.max.height);
         self.radius = diameter / 2f32;
@@ -32,6 +116,7 @@ impl Widget for Workspaces {
         let count = WORKSPACE_COUNT as f32;
         let spacing = (SPACING * count) - 1f32;
         let width = (diameter * count) + spacing;
+
         let size = bounds.constrain(Size {
             width,
             height: diameter
@@ -50,6 +135,28 @@ impl Widget for Workspaces {
             ctx.fill_circle(circle, Color::BLACK);
             
             x += (self.radius * 2f32) + SPACING;
+        }
+    }
+}
+
+fn hyprland_socket() -> Option<String> {
+    const ENV_VAR: &str = "HYPRLAND_INSTANCE_SIGNATURE";
+
+    match env::var(ENV_VAR) {
+        Ok(var) => {
+            let path = format!("/tmp/hypr/{var}/.socket2.sock");
+
+            Some(path)
+        },
+        Err(VarError::NotPresent) => {
+            eprintln!("Hyprland envrionment variable ({ENV_VAR}) not present.");
+
+            None
+        }
+        Err(VarError::NotUnicode(_)) => {
+            eprintln!("Hyprland envrionment variable ({ENV_VAR}) is present but is not valid unicode.");
+
+            None
         }
     }
 }

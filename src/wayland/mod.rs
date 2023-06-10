@@ -1,4 +1,7 @@
-use std::mem;
+use std::{
+    mem,
+    os::fd::BorrowedFd
+};
 
 use smithay_client_toolkit::{
     reexports::client::{
@@ -8,6 +11,7 @@ use smithay_client_toolkit::{
             wl_pointer::WlPointer,
             wl_seat::WlSeat
         },
+        backend::ReadEventsGuard,
         Connection, QueueHandle, EventQueue
     },
     compositor::{CompositorHandler, CompositorState},
@@ -63,7 +67,8 @@ pub enum MouseButton {
 
 pub struct BarWindow {
     event_queue: EventQueue<State>,
-    state: State
+    state: State,
+    read_events_guard: Option<ReadEventsGuard>
 }
 
 struct State {
@@ -110,6 +115,7 @@ impl BarWindow {
 
         Self {
             event_queue,
+            read_events_guard: None,
             state: State {
                 registry_state: RegistryState::new(&globals),
                 seat_state: SeatState::new(&globals, &qh),
@@ -126,8 +132,23 @@ impl BarWindow {
         }
     }
 
-    pub fn events_blocking(&mut self) -> Vec<WaylandEvent> {
-        self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+    pub fn events_socket(&mut self) -> BorrowedFd {
+        // flush the outgoing buffers to ensure that
+        // the server receives the messages
+        self.event_queue.flush().unwrap();
+
+        let read_guard = self.event_queue.prepare_read().unwrap();
+        self.read_events_guard = Some(read_guard);
+
+        self.read_events_guard.as_ref().unwrap().connection_fd()
+    }
+
+    pub fn read_events(&mut self) -> Vec<WaylandEvent> {
+        let guard = self.read_events_guard.take()
+            .expect("Call events_socket() first.");
+
+        guard.read().unwrap();
+        self.event_queue.dispatch_pending(&mut self.state).unwrap();
 
         mem::take(&mut self.state.pending_events)
     }

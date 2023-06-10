@@ -1,7 +1,15 @@
-use std::mem;
+use std::{
+    mem,
+    fmt,
+    any::Any,
+    future::Future,
+    marker::PhantomData,
+    collections::VecDeque
+};
 
 use tiny_skia::{PixmapMut, PathBuilder};
 use nohash::IntMap;
+use tokio::sync::mpsc::Sender;
 
 use crate::{
     geometry::{Rect, Circle, Size, Point},
@@ -22,6 +30,18 @@ pub struct Ui {
     size: Size
 }
 
+pub struct TaskResult {
+    id: WidgetId,
+    result: Box<dyn Any + Send>
+}
+
+#[derive(Clone, Debug)]
+pub struct ValueSender<T: Send> {
+    id: WidgetId,
+    sender: Sender<TaskResult>,
+    phantom: PhantomData<T>
+}
+
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub struct Id(WidgetId);
 
@@ -33,7 +53,8 @@ pub struct UiCtx {
     needs_layout: bool,
     widgets_to_redraw: Vec<WidgetId>,
     parent_to_children: IntMap<WidgetId, Vec<WidgetId>>,
-    child_to_parent: IntMap<WidgetId, WidgetId>
+    child_to_parent: IntMap<WidgetId, WidgetId>,
+    task_sender: Sender<TaskResult>
 }
 
 pub struct LayoutCtx<'a> {
@@ -52,16 +73,18 @@ pub struct UpdateCtx<'a> {
 }
 
 pub struct InitCtx<'a> {
+    ui: &'a mut UiCtx,
+    current: WidgetId
+}
+
+pub struct CreateCtx<'a> {
     ui: &'a mut UiCtx
 }
 
-#[derive(Debug)]
 pub enum Event {
-    Mouse(MouseEvent)
+    Mouse(MouseEvent),
+    TaskResult(Box<dyn Any>)
 }
-
-#[derive(Default, Debug)]
-pub struct ChildWidgets(Vec<WidgetId>);
 
 struct WidgetState {
     widget: Box<dyn Widget>,
@@ -70,7 +93,8 @@ struct WidgetState {
 
 impl Ui {
     pub fn new(
-        builder: impl FnOnce(&mut InitCtx) -> Id
+        task_sender: Sender<TaskResult>,
+        builder: impl FnOnce(&mut CreateCtx) -> Id
     ) -> Self {
         let mut ctx = UiCtx {
             theme: Theme::light(),
@@ -80,24 +104,25 @@ impl Ui {
             needs_layout: false,
             widgets_to_redraw: Vec::new(),
             parent_to_children: IntMap::default(),
-            child_to_parent: IntMap::default()
+            child_to_parent: IntMap::default(),
+            task_sender
         };
 
-        let mut init_ctx = InitCtx { ui: &mut ctx };
-        let root = builder(&mut init_ctx);
+        let mut create_ctx = CreateCtx { ui: &mut ctx };
+        let root = builder(&mut create_ctx);
 
         // Build the widget tree by walking the children of each widget.
-        let mut stack = vec![root.0];
+        let state = ctx.widgets.get_mut(&root.0)
+            .unwrap() as *mut WidgetState;
 
-        while let Some(current) = stack.pop() {
-            let children = ctx.widgets[&current].widget.children().0;
-            stack.extend_from_slice(&children);
+        let mut init_ctx = InitCtx {
+            current: root.0,
+            ui: &mut ctx
+        };
 
-            for child in &children {
-                ctx.child_to_parent.insert(*child, current);
-            }
-
-            ctx.parent_to_children.insert(current, children);
+        unsafe {
+            let state = &mut (*state);
+            state.widget.init(&mut init_ctx);
         }
 
         Self {
@@ -125,6 +150,20 @@ impl Ui {
         };
 
         ctx.event(&self.root, &event);
+    }
+
+    pub fn task_result(&mut self, result: TaskResult) {
+        // Widget might have been removed while the task was executing.
+        if !self.ctx.widgets.contains_key(&result.id) {
+            return;
+        }
+
+        let mut ctx = UpdateCtx {
+            ui: &mut self.ctx,
+            current: result.id
+        };
+
+        ctx.event(&Id(result.id), &Event::TaskResult(result.result));
     }
 
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
@@ -189,14 +228,14 @@ impl Ui {
         // Is there a better way to do this?
         let mut offset = Point::ZERO;
 
-        let mut stack = Vec::with_capacity(
+        let mut queue = VecDeque::with_capacity(
             self.ctx.parent_to_children.len()
         );
-        stack.push(self.root.0);
+        queue.push_back(self.root.0);
 
-        while let Some(current) = stack.pop() {
+        while let Some(current) = queue.pop_front() {
             let children = &self.ctx.parent_to_children[&current];
-            stack.extend(children);
+            queue.extend(children);
 
             offset = self.ctx.widgets[&current].layout.origin();
             
@@ -389,9 +428,84 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
 }
 
 impl<'a> InitCtx<'a> {
+    pub fn init(&mut self, child: &Id) {
+        let state = self.ui.widgets.get_mut(&child.0)
+            .unwrap() as *mut WidgetState;
+
+        self.ui.child_to_parent.insert(child.0, self.current);
+
+        // Initialize an empty Vec because if the child is a leaf
+        // node the entry in the map will never be initialized but
+        // we want to have it so that we can conveniently walk the tree.
+        self.ui.parent_to_children.insert(child.0, Vec::new());
+        self.ui.parent_to_children.entry(self.current)
+            .or_default()
+            .push(child.0);
+
+        unsafe {
+            let state = &mut (*state);
+
+            let prev = self.current;
+            self.current = child.0;
+
+            state.widget.init(self);
+            self.current = prev;
+        }
+    }
+}
+
+impl<'a> CreateCtx<'a> {
     #[inline]
     pub fn alloc(&mut self, widget: impl Widget + 'static) -> Id {
         self.ui.alloc(Box::new(widget))
+    }
+}
+
+// Copied from Xilem:
+// https://github.com/linebender/xilem/blob/0759de95bd1f20bd28c84b517177c5b9a7aa4c61/src/widget/contexts.rs#L110
+macro_rules! impl_context_method {
+    ($ty:ty,  { $($method:item)+ } ) => {
+        impl $ty { $($method)+ }
+    };
+    
+    ( $ty:ty, $($more:ty),+, { $($method:item)+ } ) => {
+        impl_context_method!($ty, { $($method)+ });
+        impl_context_method!($($more),+, { $($method)+ });
+    };
+}
+
+impl_context_method! {
+    InitCtx<'_>,
+    UpdateCtx<'_>,
+    {
+        pub fn task<T: Send + 'static>(
+            &self,
+            task: impl Future<Output = T> + Send + 'static
+        ) {
+            let tx = self.ui.task_sender.clone();
+            let id = self.current;
+    
+            tokio::spawn(async move {
+                let result = task.await;
+                
+                tx.send(TaskResult {
+                    id,
+                    result: Box::new(result)
+                }).await.unwrap();
+            });
+        }
+    
+        pub fn task_with_sender<T: Send + 'static, Fut>(
+            &self,
+            create_future: impl FnOnce(ValueSender<T>) -> Fut
+        ) where Fut: Future<Output = ()> + Send + 'static {
+            let sender = ValueSender::new(
+                self.current,
+                self.ui.task_sender.clone()
+            );
+    
+            tokio::spawn(create_future(sender));
+        }
     }
 }
 
@@ -405,18 +519,44 @@ impl WidgetState {
     }
 }
 
-impl ChildWidgets {
+impl<T: Send + 'static> ValueSender<T> {
     #[inline]
-    pub fn from_iter<'a>(
-        children: impl Iterator<Item = &'a Id>
-    ) -> Self {
-        Self(Vec::from_iter(children.map(|x| x.0)))
+    fn new(id: WidgetId, sender: Sender<TaskResult>) -> Self {
+        Self {
+            id,
+            sender,
+            phantom: PhantomData
+        }
+    }
+
+    pub async fn send(&self, value: T) {
+        let result = TaskResult {
+            id: self.id,
+            result: Box::new(value)
+        };
+
+        self.sender.send(result).await.unwrap()
     }
 }
 
-impl From<&Id> for ChildWidgets {
-    #[inline]
-    fn from(value: &Id) -> Self {
-        Self(vec![value.0])
+impl fmt::Debug for TaskResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TaskResult")
+            .field("id", &self.id)
+            .field("result", &self.result)
+            .finish()
+    }
+}
+
+impl fmt::Debug for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mouse(arg0) => f.debug_tuple("Mouse")
+                .field(arg0)
+                .finish(),
+            Self::TaskResult(arg0) => f.write_fmt(
+                format_args!("Task result: {:?}", arg0.type_id())
+            )
+        }
     }
 }
