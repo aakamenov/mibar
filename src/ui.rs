@@ -250,22 +250,6 @@ impl Ui {
 }
 
 impl UiCtx {
-    fn alloc_with_parent(
-        &mut self,
-        widget: Box<dyn Widget>,
-        parent: WidgetId
-    ) -> Id {
-        let id = self.alloc(widget);
-
-        self.child_to_parent.insert(id.0, parent);
-        self.parent_to_children
-            .entry(parent)
-            .or_insert_with(|| Vec::new())
-            .push(id.0);
-
-        id
-    }
-
     fn alloc(
         &mut self,
         widget: Box<dyn Widget>
@@ -353,14 +337,22 @@ impl<'a> UpdateCtx<'a> {
     }
 
     #[inline]
-    pub fn alloc(&mut self, widget: impl Widget + 'static) -> Id {
+    pub fn new_child(&mut self, widget: impl Widget + 'static) -> Id {
         self.request_layout();
 
-        self.ui.alloc_with_parent(Box::new(widget), self.current)
+        let id = self.ui.alloc(Box::new(widget));
+        let mut ctx = InitCtx {
+            current: self.current,
+            ui: self.ui
+        };
+
+        ctx.init(&id);
+
+        id
     }
 
     #[inline]
-    pub fn dealloc(&mut self, id: Id) {
+    pub fn dealloc_child(&mut self, id: Id) {
         self.request_layout();
         self.ui.dealloc(id);
     }
