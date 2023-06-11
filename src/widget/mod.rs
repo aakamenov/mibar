@@ -6,6 +6,8 @@ pub mod ram;
 pub mod music;
 pub mod flex;
 
+use std::any::{Any, type_name};
+
 use crate::{
     geometry::Size,
     ui::{
@@ -21,4 +23,10 @@ pub trait Widget {
     fn layout(&mut self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size;
     fn draw(&mut self, ctx: &mut DrawCtx);
     fn event(&mut self, _ctx: &mut UpdateCtx, _event: &Event) { }
+    fn task_result(&mut self, _ctx: &mut UpdateCtx, _data: Box<dyn Any>) {
+        panic!(
+            "{} is executing async tasks but hasn't implemented Widget::task_result",
+            type_name::<Self>()
+        );
+    }
 }

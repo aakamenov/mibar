@@ -1,4 +1,7 @@
-use std::env::{self, VarError};
+use std::{
+    env::{self, VarError},
+    any::Any
+};
 
 use tiny_skia::Color;
 use tokio::{
@@ -101,11 +104,11 @@ impl Widget for Workspaces {
         });
     }
 
-    fn event(&mut self, ctx: &mut UpdateCtx, event: &Event) {
-        if let Event::TaskResult(workspace) = event {
-            let workspace = workspace.downcast_ref::<WorkspaceNum>().unwrap();
-            println!("Changed to workspace: {workspace}");
-        }
+    fn event(&mut self, ctx: &mut UpdateCtx, event: &Event) { }
+
+    fn task_result(&mut self, _ctx: &mut UpdateCtx, data: Box<dyn Any>) {
+        let workspace = data.downcast_ref::<WorkspaceNum>().unwrap();
+        println!("Changed to workspace: {workspace}");
     }
 
     fn layout(&mut self, _ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {

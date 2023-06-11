@@ -32,7 +32,7 @@ pub struct Ui {
 
 pub struct TaskResult {
     id: WidgetId,
-    result: Box<dyn Any + Send>
+    data: Box<dyn Any + Send>
 }
 
 #[derive(Clone, Debug)]
@@ -81,9 +81,9 @@ pub struct CreateCtx<'a> {
     ui: &'a mut UiCtx
 }
 
+#[derive(Debug)]
 pub enum Event {
-    Mouse(MouseEvent),
-    TaskResult(Box<dyn Any>)
+    Mouse(MouseEvent)
 }
 
 struct WidgetState {
@@ -154,16 +154,21 @@ impl Ui {
 
     pub fn task_result(&mut self, result: TaskResult) {
         // Widget might have been removed while the task was executing.
-        if !self.ctx.widgets.contains_key(&result.id) {
+        let Some(state) = self.ctx.widgets.get_mut(&result.id) else {
             return;
-        }
+        };
+
+        let state = state as *mut WidgetState;
 
         let mut ctx = UpdateCtx {
             ui: &mut self.ctx,
             current: result.id
         };
 
-        ctx.event(&Id(result.id), &Event::TaskResult(result.result));
+        unsafe {
+            let state = &mut (*state);
+            state.widget.task_result(&mut ctx, result.data);
+        }
     }
 
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
@@ -482,7 +487,7 @@ impl_context_method! {
                 
                 tx.send(TaskResult {
                     id,
-                    result: Box::new(result)
+                    data: Box::new(result)
                 }).await.unwrap();
             });
         }
@@ -524,7 +529,7 @@ impl<T: Send + 'static> ValueSender<T> {
     pub async fn send(&self, value: T) {
         let result = TaskResult {
             id: self.id,
-            result: Box::new(value)
+            data: Box::new(value)
         };
 
         self.sender.send(result).await.unwrap()
@@ -535,20 +540,7 @@ impl fmt::Debug for TaskResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TaskResult")
             .field("id", &self.id)
-            .field("result", &self.result)
+            .field("data", &self.data)
             .finish()
-    }
-}
-
-impl fmt::Debug for Event {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Mouse(arg0) => f.debug_tuple("Mouse")
-                .field(arg0)
-                .finish(),
-            Self::TaskResult(arg0) => f.write_fmt(
-                format_args!("Task result: {:?}", arg0.type_id())
-            )
-        }
     }
 }
