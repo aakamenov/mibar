@@ -88,7 +88,7 @@ impl Widget for Workspaces {
 
                         // There should always be a new line.
                         let Some(new_line) = num_start.find('\n') else {
-                            eprintln!("Missing new line in hyprland output.");
+                            eprintln!("Missing new line in Hyprland output.");
 
                             continue;
                         };
@@ -107,7 +107,7 @@ impl Widget for Workspaces {
     fn event(&mut self, ctx: &mut UpdateCtx, event: &Event) { }
 
     fn task_result(&mut self, _ctx: &mut UpdateCtx, data: Box<dyn Any>) {
-        let workspace = data.downcast_ref::<WorkspaceNum>().unwrap();
+        let workspace = data.downcast::<WorkspaceNum>().unwrap();
         println!("Changed to workspace: {workspace}");
     }
 

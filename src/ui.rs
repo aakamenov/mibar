@@ -231,8 +231,6 @@ impl Ui {
         // only once here instead.
         //
         // Is there a better way to do this?
-        let mut offset = Point::ZERO;
-
         let mut queue = VecDeque::with_capacity(
             self.ctx.parent_to_children.len()
         );
@@ -242,7 +240,7 @@ impl Ui {
             let children = &self.ctx.parent_to_children[&current];
             queue.extend(children);
 
-            offset = self.ctx.widgets[&current].layout.origin();
+            let offset = self.ctx.widgets[&current].layout.origin();
             
             for child in children {
                 let state = self.ctx.widgets.get_mut(child).unwrap();
@@ -338,13 +336,13 @@ impl<'a> UpdateCtx<'a> {
 
     #[inline]
     pub fn layout(&self) -> Rect {
-        self.ui.widgets.get(&self.current).unwrap().layout
+        self.ui.widgets[&self.current].layout
     }
 
     #[inline]
     pub fn new_child(&mut self, widget: impl Widget + 'static) -> Id {
         self.request_layout();
-
+        
         let id = self.ui.alloc(Box::new(widget));
         let mut ctx = InitCtx {
             current: self.current,
