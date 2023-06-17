@@ -18,7 +18,7 @@ use crate::{
 };
 use super::{
     size_constraints::SizeConstraints,
-    Widget
+    Element, Widget
 };
 
 const WORKSPACE_COUNT: usize = 8;
@@ -27,20 +27,29 @@ const SPACING: f32 = 3f32;
 
 type WorkspaceNum = u8;
 
-pub struct Workspaces {
+pub struct Workspaces;
+pub struct WorkspacesWidget;
+
+pub struct State {
     radius: f32
 }
 
-impl Workspaces {
+impl State {
     pub fn new() -> Self {
         Self { radius: RADIUS }
     }
 }
 
-impl Widget for Workspaces {
-    fn init(&mut self, ctx: &mut InitCtx) {
+impl Element for Workspaces {
+    type Widget = WorkspacesWidget;
+    type Message = ();
+
+    fn make_widget(self, ctx: &mut InitCtx) -> (
+        Self::Widget,
+        <Self::Widget as Widget>::State
+    ) {
         let Some(socket) = hyprland_socket() else {
-            return;
+            return (WorkspacesWidget, State::new());
         };
         
         ctx.task_with_sender(|sender: ValueSender<WorkspaceNum>| {
@@ -102,19 +111,25 @@ impl Widget for Workspaces {
                 }
             }
         });
+
+        (WorkspacesWidget, State::new())
     }
+}
 
-    fn event(&mut self, ctx: &mut UpdateCtx, event: &Event) { }
+impl Widget for WorkspacesWidget {
+    type State = State;
 
-    fn task_result(&mut self, _ctx: &mut UpdateCtx, data: Box<dyn Any>) {
+    fn event(_state: &mut Self::State, _ctx: &mut UpdateCtx, _event: &Event) { }
+
+    fn task_result(_state: &mut Self::State, _ctx: &mut UpdateCtx, data: Box<dyn Any>) {
         let workspace = data.downcast::<WorkspaceNum>().unwrap();
         println!("Changed to workspace: {workspace}");
     }
 
-    fn layout(&mut self, _ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
-        let diameter = self.radius * 2f32;
+    fn layout(state: &mut Self::State, _ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+        let diameter = state.radius * 2f32;
         let diameter = diameter.clamp(bounds.min.height, bounds.max.height);
-        self.radius = diameter / 2f32;
+        state.radius = diameter / 2f32;
 
         let count = WORKSPACE_COUNT as f32;
         let spacing = (SPACING * count) - 1f32;
@@ -128,16 +143,16 @@ impl Widget for Workspaces {
         size
     }
 
-    fn draw(&mut self, ctx: &mut DrawCtx) {
+    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
         let layout = ctx.layout();
-        let y = layout.y + self.radius;
-        let mut x = layout.x + self.radius;
+        let y = layout.y + state.radius;
+        let mut x = layout.x + state.radius;
 
         for _ in 0..WORKSPACE_COUNT {
-            let circle = Circle { x, y, radius: self.radius };
+            let circle = Circle { x, y, radius: state.radius };
             ctx.fill_circle(circle, Color::BLACK);
             
-            x += (self.radius * 2f32) + SPACING;
+            x += (state.radius * 2f32) + SPACING;
         }
     }
 }

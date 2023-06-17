@@ -1,44 +1,44 @@
-use crate::{
-    ui::{CreateCtx, Id},
-    widget::{
-        workspaces::Workspaces,
-        date_time::DateTime,
-        music::Music,
-        cpu::Cpu,
-        ram::Ram,
-        flex::{Flex, Alignment}
-    }
+use crate::widget::{
+    workspaces::Workspaces,
+    date_time::DateTime,
+    music::Music,
+    cpu::Cpu,
+    ram::Ram,
+    flex::{Flex, FlexBuilder, Alignment},
+    Element
 };
 
 const PADDING: f32 = 6f32;
 const SPACING: f32 = 10f32;
 
-pub fn build(ctx: &mut CreateCtx) -> Id {
-    let left = Flex::row()
-        .spacing(SPACING)
-        .with_non_flex(ctx.alloc(Workspaces::new()))
-        .with_non_flex(ctx.alloc(DateTime::default()));
+pub fn build() -> impl Element {
+    let create = |builder: &mut FlexBuilder| {
+        let left = Flex::row(|builder| {
+            builder.add_non_flex(Workspaces);
+            builder.add_non_flex(DateTime);
+        })
+        .spacing(SPACING);
 
-    let middle = Flex::row()
-        .spacing(SPACING)
-        .with_non_flex(ctx.alloc(Music::default()));
+        builder.add_flex(left, 1f32);
 
-    let right = Flex::row()
-        .spacing(SPACING)
+        let middle = Flex::row(|builder| {
+            builder.add_non_flex(Music);
+        })
+        .spacing(SPACING);
+
+        builder.add_flex(middle, 2f32);
+
+        let right = Flex::row(|builder| {
+            builder.add_non_flex(Cpu);
+            builder.add_non_flex(Ram);
+        })
         .main_alignment(Alignment::End)
-        .with_non_flex(ctx.alloc(Cpu::default()))
-        .with_non_flex(ctx.alloc(Ram::default()));
+        .spacing(SPACING);
 
-    let left = ctx.alloc(left);
-    let middle = ctx.alloc(middle);
-    let right = ctx.alloc(right);
+        builder.add_flex(right, 1f32);
+    };
 
-    let root = Flex::row()
+    Flex::row(create)
         .spacing(SPACING)
         .padding(PADDING)
-        .with_flex(left, 1f32)
-        .with_flex(middle, 2f32)
-        .with_flex(right, 1f32);
-
-    ctx.alloc(root)
 }

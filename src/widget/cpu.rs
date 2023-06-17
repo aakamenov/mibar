@@ -1,23 +1,36 @@
 use crate::{
     geometry::Size,
-    ui::{DrawCtx, LayoutCtx}
+    ui::{InitCtx, DrawCtx, LayoutCtx}
 };
 use super::{
     size_constraints::SizeConstraints,
-    Widget
+    Element, Widget
 };
 
-#[derive(Default)]
-pub struct Cpu {
+pub struct Cpu;
+pub struct CpuWidget;
+pub struct State;
 
+impl Element for Cpu {
+    type Widget = CpuWidget;
+    type Message = ();
+
+    fn make_widget(self, _ctx: &mut InitCtx) -> (
+        Self::Widget,
+        <Self::Widget as Widget>::State
+    ) {
+        (CpuWidget, State)
+    }
 }
 
-impl Widget for Cpu {
-    fn layout(&mut self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+impl Widget for CpuWidget {
+    type State = State;
+
+    fn layout(_state: &mut Self::State, _ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
         bounds.constrain(Size { width: 100f32, height: 20f32 })
     }
 
-    fn draw(&mut self, ctx: &mut DrawCtx) {
+    fn draw(_state: &mut Self::State, ctx: &mut DrawCtx) {
         ctx.fill_rect(ctx.layout(), ctx.ui.theme.cold1);
     }
 }

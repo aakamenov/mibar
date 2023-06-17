@@ -12,9 +12,9 @@ use nohash::IntMap;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    geometry::{Rect, Circle, Size, Point},
+    geometry::{Rect, Circle, Size},
     widget::{
-        Widget,
+        Element, Widget, AnyWidget,
         size_constraints::SizeConstraints
     },
     theme::Theme,
@@ -40,6 +40,15 @@ pub struct ValueSender<T: Send> {
     id: WidgetId,
     sender: Sender<TaskResult>,
     phantom: PhantomData<T>
+}
+
+pub struct TypedId<E: Element> {
+    id: WidgetId,
+    message: fn(
+        widget: &mut <E::Widget as Widget>::State,
+        msg: E::Message
+    ),
+    data: std::marker::PhantomData<E>
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
@@ -77,29 +86,30 @@ pub struct InitCtx<'a> {
     current: WidgetId
 }
 
-pub struct CreateCtx<'a> {
-    ui: &'a mut UiCtx
-}
-
 #[derive(Debug)]
 pub enum Event {
     Mouse(MouseEvent)
 }
 
 struct WidgetState {
-    widget: Box<dyn Widget>,
+    widget: Box<dyn AnyWidget>,
+    state: Box<dyn Any>,
     layout: Rect
 }
 
 impl Ui {
-    pub fn new(
+    pub fn new<E: Element>(
         task_sender: Sender<TaskResult>,
-        builder: impl FnOnce(&mut CreateCtx) -> Id
+        build: impl FnOnce() -> E
     ) -> Self {
         let mut ctx = UiCtx {
             theme: Theme::light(),
             widgets: IntMap::default(),
-            id_counter: 0,
+            // We start from 1 because we use 0 just below as a fake ID
+            // in order to begin building the widget tree. Thus, the root
+            // widget will have an ID of 1 and in practice we never use 0
+            // after that, when walking the tree.
+            id_counter: 1,
             needs_redraw: false,
             needs_layout: false,
             widgets_to_redraw: Vec::new(),
@@ -108,25 +118,15 @@ impl Ui {
             task_sender
         };
 
-        let mut create_ctx = CreateCtx { ui: &mut ctx };
-        let root = builder(&mut create_ctx);
-
-        // Build the widget tree by walking the children of each widget.
-        let state = ctx.widgets.get_mut(&root.0)
-            .unwrap() as *mut WidgetState;
-
         let mut init_ctx = InitCtx {
-            current: root.0,
+            current: 0,
             ui: &mut ctx
         };
 
-        unsafe {
-            let state = &mut (*state);
-            state.widget.init(&mut init_ctx);
-        }
+        let root = init_ctx.new_child(build());
 
         Self {
-            root,
+            root: root.into(),
             ctx,
             size: Size::ZERO
         }
@@ -167,7 +167,7 @@ impl Ui {
 
         unsafe {
             let state = &mut (*state);
-            state.widget.task_result(&mut ctx, result.data);
+            state.widget.task_result(&mut state.state, &mut ctx, result.data);
         }
     }
 
@@ -237,8 +237,9 @@ impl Ui {
         queue.push_back(self.root.0);
 
         while let Some(current) = queue.pop_front() {
-            let children = &self.ctx.parent_to_children[&current];
-            queue.extend(children);
+            // The entry will be None when we reach a leaf node.
+            let children = self.ctx.parent_to_children.entry(current).or_default();
+            queue.extend(children.iter());
 
             let offset = self.ctx.widgets[&current].layout.origin();
             
@@ -253,19 +254,6 @@ impl Ui {
 }
 
 impl UiCtx {
-    fn alloc(
-        &mut self,
-        widget: Box<dyn Widget>
-    ) -> Id {
-        let state = WidgetState::new(widget);
-        self.widgets.insert(self.id_counter, state);
-
-        let id = Id(self.id_counter);
-        self.id_counter += 1;
-
-        id
-    }
-
     fn dealloc(&mut self, id: Id) {
         self.widgets.remove(&id.0);
         self.child_to_parent.remove(&id.0);
@@ -277,6 +265,14 @@ impl UiCtx {
         for child in children {
             self.dealloc(Id(child));
         }
+    }
+
+    #[inline]
+    fn next_id(&mut self) -> WidgetId {
+        let id = self.id_counter;
+        self.id_counter += 1;
+
+        id
     }
 
     #[inline]
@@ -295,8 +291,8 @@ impl<'a> LayoutCtx<'a> {
         unsafe {
             let state = &mut (*state);
             state.layout = Rect::default();
-
-            let size = state.widget.layout(self, bounds);
+            
+            let size = state.widget.layout(&mut state.state, self, bounds);
             state.layout.set_size(size);
 
             size
@@ -329,7 +325,7 @@ impl<'a> UpdateCtx<'a> {
             self.current = id.0;
 
             // Can't use "state" after this as the map might have been resized.
-            state.widget.event(self, event);
+            state.widget.event(&mut state.state, self, event);
             self.current = prev;
         }
     }
@@ -340,24 +336,34 @@ impl<'a> UpdateCtx<'a> {
     }
 
     #[inline]
-    pub fn new_child(&mut self, widget: impl Widget + 'static) -> Id {
+    pub fn message<E: Element>(&mut self, id: &TypedId<E>, msg: E::Message) {
+        let state = self.ui.widgets.get_mut(&id.id)
+            .unwrap() as *mut WidgetState;
+
+        unsafe {
+            let state = &mut (*state);
+            (id.message)(state.state.downcast_mut().unwrap(), msg);
+        }
+    }
+
+    #[inline]
+    pub fn new_child<E: Element>(&mut self, el: E) -> TypedId<E>
+        where E::Widget: AnyWidget
+    {
         self.request_layout();
         
-        let id = self.ui.alloc(Box::new(widget));
         let mut ctx = InitCtx {
             current: self.current,
             ui: self.ui
         };
 
-        ctx.init(&id);
-
-        id
+        ctx.new_child(el)
     }
 
     #[inline]
-    pub fn dealloc_child(&mut self, id: Id) {
+    pub fn dealloc_child(&mut self, id: impl Into<Id>) {
         self.request_layout();
-        self.ui.dealloc(id);
+        self.ui.dealloc(id.into());
     }
 
     #[inline]
@@ -388,7 +394,7 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
             let prev = self.layout;
             self.layout = state.layout;
 
-            state.widget.draw(self);
+            state.widget.draw(&mut state.state, self);
 
             self.layout = prev;
         }
@@ -423,36 +429,31 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
 }
 
 impl<'a> InitCtx<'a> {
-    pub fn init(&mut self, child: &Id) {
-        let state = self.ui.widgets.get_mut(&child.0)
-            .unwrap() as *mut WidgetState;
+    pub fn new_child<E: Element>(&mut self, el: E) -> TypedId<E>
+        where E::Widget: AnyWidget
+    {
+        let child = self.ui.next_id();
 
-        self.ui.child_to_parent.insert(child.0, self.current);
+        let parent = self.current;
+        self.current = child;
 
-        // Initialize an empty Vec because if the child is a leaf
-        // node the entry in the map will never be initialized but
-        // we want to have it so that we can conveniently walk the tree.
-        self.ui.parent_to_children.insert(child.0, Vec::new());
-        self.ui.parent_to_children.entry(self.current)
+        let (widget, state) = el.make_widget(self);
+
+        self.current = parent;
+
+        let state = WidgetState::new(Box::new(widget), Box::new(state));
+        self.ui.widgets.insert(child, state);
+
+        self.ui.child_to_parent.insert(child, parent);
+        self.ui.parent_to_children.entry(parent)
             .or_default()
-            .push(child.0);
+            .push(child);
 
-        unsafe {
-            let state = &mut (*state);
-
-            let prev = self.current;
-            self.current = child.0;
-
-            state.widget.init(self);
-            self.current = prev;
+        TypedId {
+            id: child,
+            message: E::message,
+            data: PhantomData
         }
-    }
-}
-
-impl<'a> CreateCtx<'a> {
-    #[inline]
-    pub fn alloc(&mut self, widget: impl Widget + 'static) -> Id {
-        self.ui.alloc(Box::new(widget))
     }
 }
 
@@ -506,9 +507,10 @@ impl_context_method! {
 
 impl WidgetState {
     #[inline]
-    fn new(widget: Box<dyn Widget>) -> Self {
+    fn new(widget: Box<dyn AnyWidget>, state: Box<dyn Any>) -> Self {
         Self {
             widget,
+            state,
             layout: Rect::default()
         }
     }
@@ -531,6 +533,13 @@ impl<T: Send + 'static> ValueSender<T> {
         };
 
         self.sender.send(result).await.unwrap()
+    }
+}
+
+impl <E: Element> Into<Id> for TypedId<E> {
+    #[inline]
+    fn into(self) -> Id {
+        Id(self.id)
     }
 }
 
