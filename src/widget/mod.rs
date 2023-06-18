@@ -28,6 +28,7 @@ pub trait Element {
 
     fn message(
         _state: &mut <Self::Widget as Widget>::State,
+        _ctx: &mut UpdateCtx,
         _msg: Self::Message
     ) { }
 }

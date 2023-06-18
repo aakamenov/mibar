@@ -45,8 +45,9 @@ pub struct ValueSender<T: Send> {
 pub struct TypedId<E: Element> {
     id: WidgetId,
     message: fn(
-        widget: &mut <E::Widget as Widget>::State,
-        msg: E::Message
+        &mut <E::Widget as Widget>::State,
+        &mut UpdateCtx,
+        E::Message
     ),
     data: std::marker::PhantomData<E>
 }
@@ -340,10 +341,15 @@ impl<'a> UpdateCtx<'a> {
         let state = self.ui.widgets.get_mut(&id.id)
             .unwrap() as *mut WidgetState;
 
+        let prev = self.current;
+        self.current = id.id;
+
         unsafe {
             let state = &mut (*state);
-            (id.message)(state.state.downcast_mut().unwrap(), msg);
+            (id.message)(state.state.downcast_mut().unwrap(), self, msg);
         }
+
+        self.current = prev;
     }
 
     #[inline]
