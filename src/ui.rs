@@ -7,18 +7,18 @@ use std::{
     collections::VecDeque
 };
 
-use tiny_skia::{PixmapMut, PathBuilder};
+use tiny_skia::PixmapMut;
 use nohash::IntMap;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    geometry::{Rect, Circle, Size},
+    geometry::{Rect, Size},
     widget::{
         Element, Widget, AnyWidget,
         size_constraints::SizeConstraints
     },
     theme::Theme,
-    renderer::{Renderer, Background},
+    renderer::Renderer,
     wayland::MouseEvent
 };
 
@@ -27,7 +27,8 @@ type WidgetId = u64;
 pub struct Ui {
     ctx: UiCtx,
     root: Id,
-    size: Size
+    size: Size,
+    renderer: Renderer
 }
 
 pub struct TaskResult {
@@ -71,9 +72,9 @@ pub struct LayoutCtx<'a> {
     ui: &'a mut UiCtx
 }
 
-pub struct DrawCtx<'a, 'b> {
+pub struct DrawCtx<'a> {
     pub ui: &'a mut UiCtx,
-    renderer: &'a mut Renderer<'b>,
+    pub renderer: &'a mut Renderer,
     layout: Rect
 }
 
@@ -129,7 +130,8 @@ impl Ui {
         Self {
             root: root.into(),
             ctx,
-            size: Size::ZERO
+            size: Size::ZERO,
+            renderer: Renderer::new()
         }
     }
 
@@ -183,16 +185,10 @@ impl Ui {
             self.layout_impl();
         }
 
-        let mut renderer = Renderer {
-            pixmap,
-            builder: PathBuilder::new(),
-            clip_stack: Vec::new()
-        };
-
         let mut ctx = DrawCtx {
             ui: &mut self.ctx,
             layout: Rect::default(),
-            renderer: &mut renderer
+            renderer: &mut self.renderer
         };
 
         if ctx.ui.needs_layout || ctx.ui.widgets_to_redraw.is_empty() {
@@ -210,6 +206,8 @@ impl Ui {
 
         self.ctx.needs_redraw = false;
         self.ctx.needs_layout = false;
+
+        self.renderer.render(pixmap);
     }
 
     #[inline]
@@ -388,7 +386,7 @@ impl<'a> UpdateCtx<'a> {
     }
 }
 
-impl<'a, 'b> DrawCtx<'a, 'b> {
+impl<'a> DrawCtx<'a> {
     #[inline]
     pub fn draw(&mut self, id: &Id) {
         let state = self.ui.widgets.get_mut(&id.0)
@@ -409,28 +407,6 @@ impl<'a, 'b> DrawCtx<'a, 'b> {
     #[inline]
     pub fn layout(&self) -> Rect {
         self.layout
-    }
-
-    #[inline]
-    pub fn fill_circle(&mut self, circle: Circle, bg: impl Into<Background>) {
-        self.renderer.builder.push_circle(circle.x, circle.y, circle.radius);
-        self.renderer.draw_path(bg);
-    }
-
-    #[inline]
-    pub fn fill_rect(&mut self, rect: Rect, bg: impl Into<Background>) {
-        self.renderer.builder.push_rect(rect.x, rect.y, rect.width, rect.height);
-        self.renderer.draw_path(bg);
-    }
-
-    #[inline]
-    pub fn push_clip(&mut self, rect: Rect) {
-        self.renderer.clip_stack.push(rect);
-    }
-
-    #[inline]
-    pub fn pop_clip(&mut self) {
-        self.renderer.clip_stack.pop();
     }
 }
 

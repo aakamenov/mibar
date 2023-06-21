@@ -10,11 +10,12 @@ use tokio::{
 };
 
 use crate::{
-    geometry::{Size, Circle},
+    geometry::Size,
     ui::{
         InitCtx, DrawCtx, LayoutCtx,
         UpdateCtx, Event, ValueSender
-    }
+    },
+    renderer::Circle
 };
 use super::{
     size_constraints::SizeConstraints,
@@ -149,8 +150,9 @@ impl Widget for WorkspacesWidget {
         let mut x = layout.x + state.radius;
 
         for _ in 0..WORKSPACE_COUNT {
-            let circle = Circle { x, y, radius: state.radius };
-            ctx.fill_circle(circle, Color::BLACK);
+            ctx.renderer.fill_circle(
+                Circle::new((x, y), state.radius, Color::BLACK)
+            );
             
             x += (state.radius * 2f32) + SPACING;
         }

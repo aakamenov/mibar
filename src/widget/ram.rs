@@ -1,7 +1,8 @@
 use crate::{
     geometry::Size,
     ui::{InitCtx, DrawCtx, LayoutCtx, UpdateCtx, Event},
-    wayland::MouseEvent
+    wayland::MouseEvent,
+    renderer::Quad
 };
 use super::{
     size_constraints::SizeConstraints,
@@ -32,7 +33,9 @@ impl Widget for RamWidget {
     }
 
     fn draw(_state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.fill_rect(ctx.layout(), ctx.ui.theme.cold3);
+        ctx.renderer.fill_quad(
+            Quad::new(ctx.layout(), ctx.ui.theme.cold3)
+        );
     }
 
     fn event(_state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {

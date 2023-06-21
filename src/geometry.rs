@@ -14,13 +14,6 @@ pub struct Rect {
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct Circle {
-    pub x: f32,
-    pub y: f32,
-    pub radius: f32
-}
-
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct Size {
     pub width: f32,
     pub height: f32
@@ -28,6 +21,12 @@ pub struct Size {
 
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct Point {
+    pub x: f32,
+    pub y: f32
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub struct Vector {
     pub x: f32,
     pub y: f32
 }
@@ -129,6 +128,13 @@ impl Point {
     }
 }
 
+impl Vector {
+    #[inline]
+    pub const fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
+
 impl Add for Point {
     type Output = Self;
 
@@ -173,5 +179,11 @@ impl FloatExt for f32 {
 impl From<(f32, f32)> for Point {
     fn from(point: (f32, f32)) -> Self {
         Self { x: point.0, y: point.1 }
+    }
+}
+
+impl From<(f32, f32)> for Vector {
+    fn from(vector: (f32, f32)) -> Self {
+        Self { x: vector.0, y: vector.1 }
     }
 }
