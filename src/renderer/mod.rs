@@ -1,3 +1,5 @@
+use std::mem;
+
 use tiny_skia::{
     PixmapMut, PathBuilder, FillRule, Transform,
     Paint, Color, LinearGradient, Shader, Mask,
@@ -8,8 +10,7 @@ use crate::geometry::{Rect, Point};
 
 pub struct Renderer {
     mask: Mask,
-    groups: Vec<Group>,
-    current_group: usize
+    commands: Vec<Command>
 }
 
 #[derive(Clone, Debug)]
@@ -39,11 +40,11 @@ pub struct Circle {
     pub border_color: Background
 }
 
-#[derive(Default, Debug)]
-struct Group {
-    clip: Option<Rect>,
-    transform: Transform,
-    primitives: Vec<Primitive>
+#[derive(Debug)]
+enum Command {
+    Draw(Primitive),
+    Clip(Rect),
+    PopClip
 }
 
 #[derive(Debug)]
@@ -57,38 +58,32 @@ impl Renderer {
     pub fn new() -> Self {
         Self {
             mask: Mask::new(1, 1).unwrap(),
-            groups: vec![Group::default()],
-            current_group: 0
+            commands: Vec::with_capacity(64)
         }
     }
 
     #[inline]
     pub fn fill_quad(&mut self, quad: Quad) {
-        self.groups[self.current_group]
-            .primitives
-            .push(Primitive::Quad(quad));
+        self.commands.push(
+            Command::Draw(Primitive::Quad(quad))
+        );
     }
 
     #[inline]
     pub fn fill_circle(&mut self, circle: Circle) {
-        self.groups[self.current_group]
-            .primitives
-            .push(Primitive::Circle(circle));
+        self.commands.push(
+            Command::Draw(Primitive::Circle(circle))
+        );
     }
 
     #[inline]
     pub fn push_clip(&mut self, clip: Rect) {
-        self.current_group += 1;
-        self.groups.push(Group {
-            clip: Some(clip),
-            transform: Transform::identity(),
-            primitives: Vec::new()
-        });
+        self.commands.push(Command::Clip(clip));
     }
 
     #[inline]
     pub fn pop_clip(&mut self) {
-        self.current_group -= 1;
+        self.commands.push(Command::PopClip);
     }
 
     pub(crate) fn render(&mut self, pixmap: &mut PixmapMut) {
@@ -98,126 +93,141 @@ impl Renderer {
             self.mask = Mask::new(pixmap.width(), pixmap.height()).unwrap();
         }
 
-        // Set clip rect to viewport.
-        self.groups[0].clip = Some(
-            Rect::new(
-                0f32,
-                0f32,
-                pixmap.width() as f32,
-                pixmap.height() as f32
-            )
-        );
+        let mut clip_stack = Vec::with_capacity(8);
+        let mut has_clip = false;
 
         let mut mask_path = PathBuilder::new();
         let mut builder = PathBuilder::new();
 
-        for group in self.groups.drain(..) {
-            if let Some(clip_rect) = group.clip {
-                mask_path.push_rect(clip_rect.into());
+        let mut commands = mem::take(&mut self.commands);
+        for command in commands.drain(..) {
+            match command {
+                Command::Draw(primitive) => {
+                    let mask = has_clip.then_some(&self.mask);
 
-                let path = mask_path.finish().unwrap();
-                self.mask.fill_path(
-                    &path,
-                    FillRule::EvenOdd,
-                    false,
-                    Transform::identity()
-                );
+                    match primitive {
+                        Primitive::Quad(quad) => {
+                            let radius = quad.border_radius.0;
 
-                mask_path = path.clear();
-            }
+                            if radius[0] +
+                                radius[1] +
+                                radius[2] +
+                                radius[3] > 0f32
+                            {
+                                rounded_rect(&mut builder, quad.rect, radius)
+                            } else {
+                                builder.push_rect(quad.rect.into());
+                            }
 
-            for primitive in group.primitives {
-                match primitive {
-                    Primitive::Quad(quad) => {
-                        let radius = quad.border_radius.0;
+                            let path = builder.finish().unwrap();
 
-                        if radius[0] +
-                            radius[1] +
-                            radius[2] +
-                            radius[3] > 0f32
-                        {
-                            rounded_rect(&mut builder, quad.rect, radius)
-                        } else {
-                            builder.push_rect(quad.rect.into());
-                        }
-
-                        let path = builder.finish().unwrap();
-
-                        let mut paint = Paint::default();
-                        paint.anti_alias = true;
-                        paint.shader = quad.background.into();
-                
-                        pixmap.fill_path(
-                            &path,
-                            &paint,
-                            FillRule::EvenOdd,
-                            group.transform,
-                            Some(&self.mask)
-                        );
-
-                        if quad.border_width > 0f32 {
-                            paint.shader = quad.border_color.into();
-
-                            let mut stroke = Stroke::default();
-                            stroke.width = quad.border_width;
-
-                            pixmap.stroke_path(
+                            let mut paint = Paint::default();
+                            paint.anti_alias = true;
+                            paint.shader = quad.background.into();
+                    
+                            pixmap.fill_path(
                                 &path,
                                 &paint,
-                                &stroke,
-                                group.transform,
-                                Some(&self.mask)
-                            )
+                                FillRule::EvenOdd,
+                                Transform::identity(),
+                                mask
+                            );
+
+                            if quad.border_width > 0f32 {
+                                paint.shader = quad.border_color.into();
+
+                                let mut stroke = Stroke::default();
+                                stroke.width = quad.border_width;
+
+                                pixmap.stroke_path(
+                                    &path,
+                                    &paint,
+                                    &stroke,
+                                    Transform::identity(),
+                                    mask
+                                )
+                            }
+
+                            builder = path.clear();
                         }
+                        Primitive::Circle(circle) => {
+                            builder.push_circle(
+                                circle.pos.x,
+                                circle.pos.y,
+                                circle.radius
+                            );
 
-                        builder = path.clear();
-                    }
-                    Primitive::Circle(circle) => {
-                        builder.push_circle(
-                            circle.pos.x,
-                            circle.pos.y,
-                            circle.radius
-                        );
+                            let path = builder.finish().unwrap();
 
-                        let path = builder.finish().unwrap();
+                            let mut paint = Paint::default();
+                            paint.anti_alias = true;
+                            paint.shader = circle.background.into();
 
-                        let mut paint = Paint::default();
-                        paint.anti_alias = true;
-                        paint.shader = circle.background.into();
-
-                        pixmap.fill_path(
-                            &path,
-                            &paint,
-                            FillRule::EvenOdd,
-                            group.transform,
-                            Some(&self.mask)
-                        );
-
-                        if circle.border_width > 0f32 {
-                            paint.shader = circle.border_color.into();
-
-                            let mut stroke = Stroke::default();
-                            stroke.width = circle.border_width;
-
-                            pixmap.stroke_path(
+                            pixmap.fill_path(
                                 &path,
                                 &paint,
-                                &stroke,
-                                group.transform,
-                                Some(&self.mask)
-                            )
+                                FillRule::EvenOdd,
+                                Transform::identity(),
+                                mask
+                            );
+
+                            if circle.border_width > 0f32 {
+                                paint.shader = circle.border_color.into();
+
+                                let mut stroke = Stroke::default();
+                                stroke.width = circle.border_width;
+
+                                pixmap.stroke_path(
+                                    &path,
+                                    &paint,
+                                    &stroke,
+                                    Transform::identity(),
+                                    mask
+                                )
+                            }
+
+                            builder = path.clear();
                         }
-
-                        builder = path.clear();
                     }
-                }   
-            }
+                }
+                Command::Clip(rect) => {
+                    has_clip = true;
+                    clip_stack.push(rect);
+                    mask_path = self.adjust_clip_mask(mask_path, rect);
+                }
+                Command::PopClip => {
+                    if let Some(clip) = clip_stack.pop() {
+                        mask_path = self.adjust_clip_mask(mask_path, clip);
+                    }
 
-            mask_path.clear();
+                    has_clip = !clip_stack.is_empty();
+                }
+            }
         }
 
-        self.groups.push(Group::default());
-        self.current_group = 0;
+        // Assign back the buffer in order to reuse the memory.
+        self.commands = commands;
+    }
+
+    #[inline]
+    fn adjust_clip_mask(
+        &mut self,
+        mut builder: PathBuilder,
+        clip: Rect
+    ) -> PathBuilder {
+        self.mask.clear();
+
+        builder.push_rect(clip.into());
+        let path = builder.finish().unwrap();
+
+        self.mask.fill_path(
+            &path,
+            FillRule::EvenOdd,
+            false,
+            Transform::identity()
+        );
+
+        path.clear()
     }
 }
 
