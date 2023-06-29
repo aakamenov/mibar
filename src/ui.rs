@@ -255,7 +255,12 @@ impl Ui {
 impl UiCtx {
     fn dealloc(&mut self, id: Id) {
         self.widgets.remove(&id.0);
-        self.child_to_parent.remove(&id.0);
+
+        let parent = self.child_to_parent.remove(&id.0).unwrap();
+        let children = self.parent_to_children.entry(parent).or_default();
+        let index = children.iter().position(|x| *x == id.0).unwrap();
+        // Can't use swap_remove() because order is important
+        children.remove(index);
 
         let children = self.parent_to_children
             .remove(&id.0)
