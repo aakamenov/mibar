@@ -4,7 +4,8 @@ use std::{
     any::Any,
     future::Future,
     marker::PhantomData,
-    collections::VecDeque
+    collections::VecDeque,
+    borrow::Borrow
 };
 
 use tiny_skia::PixmapMut;
@@ -44,7 +45,7 @@ pub struct ValueSender<T: Send> {
 }
 
 pub struct TypedId<E: Element> {
-    id: WidgetId,
+    id: Id,
     message: fn(
         &mut <E::Widget as Widget>::State,
         &mut UpdateCtx,
@@ -199,7 +200,7 @@ impl Ui {
 
             for widget in to_redraw {
                 if ctx.ui.widgets.contains_key(&widget) {
-                    ctx.draw(&Id(widget));
+                    ctx.draw(Id(widget));
                 }
             }
         }
@@ -288,8 +289,8 @@ impl UiCtx {
 
 impl<'a> LayoutCtx<'a> {
     #[inline]
-    pub fn layout(&mut self, id: &Id, bounds: SizeConstraints) -> Size {
-        let state = self.ui.widgets.get_mut(&id.0)
+    pub fn layout(&mut self, id: impl Borrow<Id>, bounds: SizeConstraints) -> Size {
+        let state = self.ui.widgets.get_mut(&id.borrow().0)
             .unwrap() as *mut WidgetState;
 
         unsafe {
@@ -306,10 +307,10 @@ impl<'a> LayoutCtx<'a> {
     #[inline]
     pub fn position(
         &mut self,
-        id: &Id,
+        id: impl Borrow<Id>,
         func: impl FnOnce(&mut Rect)
     ) -> Rect {
-        let state = self.ui.widgets.get_mut(&id.0).unwrap();
+        let state = self.ui.widgets.get_mut(&id.borrow().0).unwrap();
         func(&mut state.layout);
 
         state.layout
@@ -318,15 +319,16 @@ impl<'a> LayoutCtx<'a> {
 
 impl<'a> UpdateCtx<'a> {
     #[inline]
-    pub fn event(&mut self, id: &Id, event: &Event) {
-        let state = self.ui.widgets.get_mut(&id.0)
+    pub fn event(&mut self, id: impl Borrow<Id>, event: &Event) {
+        let id = id.borrow().0;
+        let state = self.ui.widgets.get_mut(&id)
             .unwrap() as *mut WidgetState;
 
         unsafe {
             let state = &mut (*state);
 
             let prev = self.current;
-            self.current = id.0;
+            self.current = id;
 
             // Can't use "state" after this as the map might have been resized.
             state.widget.event(&mut state.state, self, event);
@@ -341,11 +343,11 @@ impl<'a> UpdateCtx<'a> {
 
     #[inline]
     pub fn message<E: Element>(&mut self, id: &TypedId<E>, msg: E::Message) {
-        let state = self.ui.widgets.get_mut(&id.id)
+        let state = self.ui.widgets.get_mut(&id.inner())
             .unwrap() as *mut WidgetState;
 
         let prev = self.current;
-        self.current = id.id;
+        self.current = id.inner();
 
         unsafe {
             let state = &mut (*state);
@@ -393,8 +395,8 @@ impl<'a> UpdateCtx<'a> {
 
 impl<'a> DrawCtx<'a> {
     #[inline]
-    pub fn draw(&mut self, id: &Id) {
-        let state = self.ui.widgets.get_mut(&id.0)
+    pub fn draw(&mut self, id: impl Borrow<Id>) {
+        let state = self.ui.widgets.get_mut(&id.borrow().0)
             .unwrap() as *mut WidgetState;
 
         unsafe {
@@ -437,7 +439,7 @@ impl<'a> InitCtx<'a> {
             .push(child);
 
         TypedId {
-            id: child,
+            id: Id(child),
             message: E::message,
             data: PhantomData
         }
@@ -523,10 +525,38 @@ impl<T: Send + 'static> ValueSender<T> {
     }
 }
 
-impl <E: Element> Into<Id> for TypedId<E> {
+impl<E: Element> TypedId<E> {
+    #[inline]
+    fn inner(&self) -> WidgetId {
+        self.id.0
+    }
+}
+
+impl<E: Element> Into<Id> for TypedId<E> {
     #[inline]
     fn into(self) -> Id {
-        Id(self.id)
+        Id(self.inner())
+    }
+}
+
+impl<E: Element> Borrow<Id> for TypedId<E> {
+    #[inline]
+    fn borrow(&self) -> &Id {
+        &self.id
+    }
+}
+
+impl<E: Element> Borrow<Id> for &TypedId<E> {
+    #[inline]
+    fn borrow(&self) -> &Id {
+        &self.id
+    }
+}
+
+impl<E: Element> Borrow<Id> for &mut TypedId<E> {
+    #[inline]
+    fn borrow(&self) -> &Id {
+        &self.id
     }
 }
 
