@@ -103,8 +103,8 @@ impl Rect {
         Self {
             x: self.x + amount,
             y: self.y + amount,
-            width: self.width - amount,
-            height: self.height - amount
+            width: self.width - amount - amount,
+            height: self.height - amount - amount
         }
     }
 
@@ -116,6 +116,14 @@ impl Rect {
             point.x < self.x + self.width &&
             point.y >= self.y &&
             point.y < self.y + self.height
+    }
+
+    #[inline]
+    pub fn center(&self) -> Point {
+        Point::new(
+            self.x + (self.width / 2f32),
+            self.y + (self.height / 2f32),
+        )
     }
 }
 
