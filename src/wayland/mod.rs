@@ -132,6 +132,12 @@ impl BarWindow {
         }
     }
 
+    pub fn events_blocking(&mut self) -> Vec<WaylandEvent> {
+        self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+
+        mem::take(&mut self.state.pending_events)
+    }
+
     pub fn events_socket(&mut self) -> BorrowedFd {
         // flush the outgoing buffers to ensure that
         // the server receives the messages

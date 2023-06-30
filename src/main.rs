@@ -25,6 +25,29 @@ async fn main() {
     // TODO: It'd be more efficient to process multiple results at once.
     let (tx, mut rx) = channel::<TaskResult>(100);
     let mut ui = Ui::new(tx, bar::build);
+
+    // Wait for the initial resize event
+    {
+        let mut events = Vec::new();
+        while events.is_empty() {
+            events = window.events_blocking();
+        }
+
+        assert!(events.iter().any(|x|
+            matches!(x, WaylandEvent::Resize(_))
+        ));
+
+        process_events(&mut ui, events);
+        window.canvas(|canvas, size| {
+            let mut pixmap = PixmapMut::from_bytes(
+                canvas,
+                size.0,
+                size.1
+            ).unwrap();
+
+            ui.draw(&mut pixmap);
+        });
+    }
     
     loop {
         let wl_fd = AsyncFd::new(window.events_socket()).unwrap();
@@ -34,18 +57,9 @@ async fn main() {
 
             _ = wl_fd.readable() => {
                 drop(wl_fd);
-
-                for event in window.read_events() {
-                    match event {
-                        WaylandEvent::Resize(size) =>
-                            ui.layout(Size {
-                                width: size.0 as f32,
-                                height: size.1 as f32
-                            }),
-                        WaylandEvent::Mouse(event) =>
-                            ui.event(Event::Mouse(event))
-                    }
-                }
+                
+                let events = window.read_events();
+                process_events(&mut ui, events);
 
                 // We prioritize events from the compositor but
                 // check for completed tasks as well so that we can only
@@ -73,6 +87,21 @@ async fn main() {
 
                 ui.draw(&mut pixmap);
             });
+        }
+    }
+}
+
+#[inline]
+fn process_events(ui: &mut Ui, events: Vec<WaylandEvent>) {
+    for event in events {
+        match event {
+            WaylandEvent::Resize(size) =>
+                ui.layout(Size {
+                    width: size.0 as f32,
+                    height: size.1 as f32
+                }),
+            WaylandEvent::Mouse(event) =>
+                ui.event(Event::Mouse(event))
         }
     }
 }
