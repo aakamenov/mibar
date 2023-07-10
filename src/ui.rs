@@ -18,7 +18,7 @@ use crate::{
         size_constraints::SizeConstraints
     },
     theme::Theme,
-    renderer::Renderer,
+    renderer::CachedRenderer,
     wayland::MouseEvent
 };
 
@@ -28,7 +28,7 @@ pub struct Ui {
     ctx: UiCtx,
     root: Id,
     size: Size,
-    renderer: Renderer
+    renderer: CachedRenderer
 }
 
 pub struct TaskResult {
@@ -74,7 +74,7 @@ pub struct LayoutCtx<'a> {
 
 pub struct DrawCtx<'a> {
     pub ui: &'a mut UiCtx,
-    pub renderer: &'a mut Renderer,
+    pub renderer: &'a mut CachedRenderer,
     layout: Rect
 }
 
@@ -131,7 +131,7 @@ impl Ui {
             root: root.into(),
             ctx,
             size: Size::ZERO,
-            renderer: Renderer::new()
+            renderer: CachedRenderer::new()
         }
     }
 
@@ -139,6 +139,8 @@ impl Ui {
         if size == self.size {
             return;
         }
+
+        self.renderer.resize(size);
 
         self.size = size;
         self.ctx.needs_redraw = true;
@@ -178,7 +180,7 @@ impl Ui {
         }
     }
 
-    pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
+    pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) -> Vec<Rect> {
         assert_eq!(pixmap.width() , self.size.width as u32);
         assert_eq!(pixmap.height() , self.size.height as u32);
         
@@ -197,7 +199,7 @@ impl Ui {
         self.ctx.needs_redraw = false;
         self.ctx.needs_layout = false;
 
-        self.renderer.render(pixmap);
+        self.renderer.render(pixmap)
     }
 
     #[inline]

@@ -46,7 +46,7 @@ async fn main() {
                 size.1
             ).unwrap();
 
-            ui.draw(&mut pixmap);
+            ui.draw(&mut pixmap)
         });
     }
     
@@ -86,7 +86,7 @@ async fn main() {
                     size.1
                 ).unwrap();
 
-                ui.draw(&mut pixmap);
+                ui.draw(&mut pixmap)
             });
         }
     }

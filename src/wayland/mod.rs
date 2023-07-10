@@ -37,7 +37,7 @@ use smithay_client_toolkit::{
     delegate_pointer
 };
 
-use crate::geometry::Point;
+use crate::geometry::{Point, Rect};
 
 #[derive(Debug)]
 pub enum WaylandEvent {
@@ -161,7 +161,7 @@ impl BarWindow {
 
     pub fn canvas(
         &mut self,
-        func: impl FnOnce(&mut [u8], (u32, u32))
+        func: impl FnOnce(&mut [u8], (u32, u32)) -> Vec<Rect>
     ) {
         let width = self.state.size.0;
         let height = self.state.size.1;
@@ -195,12 +195,18 @@ impl BarWindow {
             }
         };
 
-        func(canvas, self.state.size);
+        let dirty_regions = func(canvas, self.state.size);
 
         let surface = self.state.layer_surface.wl_surface();
 
-        // Damage the entire window
-        surface.damage_buffer(0, 0, width as i32, height as i32);
+        for damage in dirty_regions {
+            surface.damage_buffer(
+                damage.x as i32,
+                damage.y as i32,
+                damage.width as i32,
+                damage.height as i32
+            );
+        }
 
         // Request our next frame
         surface.frame(&self.event_queue.handle(), surface.clone());
