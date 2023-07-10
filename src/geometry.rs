@@ -58,8 +58,13 @@ impl Size {
 
 impl Rect {
     #[inline]
-    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+    pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self { x, y, width, height }
+    }
+
+    #[inline]
+    pub const fn from_size(size: Size) -> Self {
+        Self::new(0f32, 0f32, size.width, size.height)
     }
 
     #[inline]
@@ -88,10 +93,10 @@ impl Rect {
 
     #[must_use]
     #[inline]
-    pub fn translate(&self, amount: Size) -> Rect {
+    pub fn translate(&self, amount: Vector) -> Rect {
         Self {
-            x: self.x + amount.width,
-            y: self.y + amount.height,
+            x: self.x + amount.x,
+            y: self.y + amount.y,
             width: self.width,
             height: self.height
         }
@@ -116,6 +121,32 @@ impl Rect {
             point.x < self.x + self.width &&
             point.y >= self.y &&
             point.y < self.y + self.height
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn intersect(&self, other: Self) -> Option<Self> {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let width = (self.x + self.width).min(other.x + other.width);
+        let height = (self.y + self.height).min(other.y + other.height);
+
+        if width > x && height > y {
+            Some(Self {
+                x,
+                y,
+                width: width - x,
+                height: height - y
+            })
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn overlaps(&self, other: Self) -> bool {
+        other.x + other.width  >= self.x && other.x <= self.x + self.width &&
+            other.y + other.height >= self.y && other.y <= self.y + self.height
     }
 
     #[inline]
