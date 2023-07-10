@@ -1,5 +1,4 @@
 pub mod size_constraints;
-pub mod workspaces;
 pub mod date_time;
 pub mod cpu;
 pub mod ram;

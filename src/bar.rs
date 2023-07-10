@@ -1,11 +1,13 @@
-use crate::widget::{
-    workspaces::Workspaces,
-    date_time::DateTime,
-    music::Music,
-    cpu::Cpu,
-    ram::Ram,
-    flex::{Flex, FlexBuilder, Alignment},
-    Element
+use crate::{
+    modules::Workspaces,
+    widget::{
+        date_time::DateTime,
+        music::Music,
+        cpu::Cpu,
+        ram::Ram,
+        flex::{Flex, FlexBuilder, Alignment},
+        Element
+    }
 };
 
 const PADDING: f32 = 6f32;

@@ -1,5 +1,6 @@
 use crate::{
     geometry::{Size, Rect},
+    renderer::Quad,
     ui::{
         InitCtx,DrawCtx, LayoutCtx,
         UpdateCtx, Event, Id
@@ -275,6 +276,8 @@ impl Widget for FlexWidget {
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
+        ctx.renderer.fill_quad(Quad::new(ctx.layout(), ctx.ui.theme.base));
+
         for (child, _) in &state.children {
             ctx.draw(child);
         }
