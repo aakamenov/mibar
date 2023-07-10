@@ -1,5 +1,4 @@
 use std::{
-    mem,
     fmt,
     any::Any,
     future::Future,
@@ -13,7 +12,7 @@ use nohash::IntMap;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    geometry::{Rect, Size},
+    geometry::{Rect, Size, Point},
     widget::{
         Element, Widget, AnyWidget,
         size_constraints::SizeConstraints
@@ -59,11 +58,11 @@ pub struct Id(WidgetId);
 
 pub struct UiCtx {
     pub theme: Theme,
+    mouse_pos: Point,
     widgets: IntMap<WidgetId, WidgetState>,
     id_counter: u64,
     needs_redraw: bool,
     needs_layout: bool,
-    widgets_to_redraw: Vec<WidgetId>,
     parent_to_children: IntMap<WidgetId, Vec<WidgetId>>,
     child_to_parent: IntMap<WidgetId, WidgetId>,
     task_sender: Sender<TaskResult>
@@ -107,6 +106,7 @@ impl Ui {
     ) -> Self {
         let mut ctx = UiCtx {
             theme: Theme::light(),
+            mouse_pos: Point::ZERO,
             widgets: IntMap::default(),
             // We start from 1 because we use 0 just below as a fake ID
             // in order to begin building the widget tree. Thus, the root
@@ -115,7 +115,6 @@ impl Ui {
             id_counter: 1,
             needs_redraw: false,
             needs_layout: false,
-            widgets_to_redraw: Vec::new(),
             parent_to_children: IntMap::default(),
             child_to_parent: IntMap::default(),
             task_sender
@@ -148,6 +147,10 @@ impl Ui {
     }
 
     pub fn event(&mut self, event: Event) {
+        if let Event::Mouse(MouseEvent::MouseMove(pos)) = event {
+            self.ctx.mouse_pos = pos;
+        }
+
         let mut ctx = UpdateCtx {
             ui: &mut self.ctx,
             current: self.root.0
@@ -178,10 +181,7 @@ impl Ui {
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
         assert_eq!(pixmap.width() , self.size.width as u32);
         assert_eq!(pixmap.height() , self.size.height as u32);
-
-        // TODO: The background should be drawn by the root widget.
-        pixmap.fill(self.ctx.theme.base);
-
+        
         if self.ctx.needs_layout {
             self.layout_impl();
         }
@@ -192,18 +192,7 @@ impl Ui {
             renderer: &mut self.renderer
         };
 
-        if ctx.ui.needs_layout || ctx.ui.widgets_to_redraw.is_empty() {
-            // We do full layout and redraw at the moment if layout was requested.
-            ctx.draw(&self.root);
-        } else {
-            let to_redraw = mem::take(&mut ctx.ui.widgets_to_redraw);
-
-            for widget in to_redraw {
-                if ctx.ui.widgets.contains_key(&widget) {
-                    ctx.draw(Id(widget));
-                }
-            }
-        }
+        ctx.draw(&self.root);
 
         self.ctx.needs_redraw = false;
         self.ctx.needs_layout = false;
@@ -225,9 +214,9 @@ impl Ui {
 
         // Translate all widget positions from parent local space
         // to window space. This feels like a giant hack but enables
-        // granular redrawing as otherwise the only way to translate
+        // granular updates as otherwise the only way to translate
         // to window space during draw would be to walk the widget
-        // tree for EACH widget that is to be redrawn. So we do this
+        // tree for EACH widget that is to be redrawn/updated. So we do this
         // only once here instead.
         //
         // Is there a better way to do this?
@@ -278,12 +267,6 @@ impl UiCtx {
         self.id_counter += 1;
 
         id
-    }
-
-    #[inline]
-    fn queue_draw(&mut self, id: WidgetId) {
-        self.widgets_to_redraw.push(id);
-        self.needs_redraw = true;
     }
 }
 
@@ -342,6 +325,11 @@ impl<'a> UpdateCtx<'a> {
     }
 
     #[inline]
+    pub fn is_hovered(&self) -> bool {
+        self.layout().contains(self.ui.mouse_pos)
+    }
+
+    #[inline]
     pub fn message<E: Element>(&mut self, id: &TypedId<E>, msg: E::Message) {
         let state = self.ui.widgets.get_mut(&id.inner())
             .unwrap() as *mut WidgetState;
@@ -379,17 +367,12 @@ impl<'a> UpdateCtx<'a> {
 
     #[inline]
     pub fn request_redraw(&mut self) {
-        // If layout was requested we layout and
-        // then redraw all widgets currently.
-        if !self.ui.needs_layout {
-            self.ui.queue_draw(self.current);
-        }
+        self.ui.needs_redraw = true;
     }
 
     pub fn request_layout(&mut self) {
         self.ui.needs_layout = true;
         self.ui.needs_redraw = true;
-        self.ui.widgets_to_redraw.clear();
     }
 }
 
@@ -409,6 +392,11 @@ impl<'a> DrawCtx<'a> {
 
             self.layout = prev;
         }
+    }
+
+    #[inline]
+    pub fn is_hovered(&self) -> bool {
+        self.layout.contains(self.ui.mouse_pos)
     }
 
     #[inline]
@@ -490,6 +478,19 @@ impl_context_method! {
             );
     
             tokio::spawn(create_future(sender));
+        }
+    }
+}
+
+impl_context_method! {
+    InitCtx<'_>,
+    LayoutCtx<'_>,
+    UpdateCtx<'_>,
+    DrawCtx<'_>,
+    {
+        #[inline]
+        pub fn mouse_pos(&self) -> Point {
+            self.ui.mouse_pos
         }
     }
 }
