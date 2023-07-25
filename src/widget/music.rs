@@ -33,8 +33,8 @@ impl Widget for MusicWidget {
 
     fn draw(_state: &mut Self::State, ctx: &mut DrawCtx) {
         ctx.renderer.fill_quad(
-            Quad::rounded(ctx.layout(), ctx.ui.theme.warm2, 6f32)
-                .with_border(2f32, ctx.ui.theme.warm1)
+            Quad::rounded(ctx.layout(), ctx.theme().warm2, 6f32)
+                .with_border(2f32, ctx.theme().warm1)
         );
     }
 }

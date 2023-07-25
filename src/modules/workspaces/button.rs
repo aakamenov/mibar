@@ -77,7 +77,7 @@ impl Widget for ButtonWidget {
                     layout.center(),
                     layout.width / 2f32,
                     Color::TRANSPARENT
-                ).with_border(HOVER_OUTLINE, ctx.ui.theme.muted)
+                ).with_border(HOVER_OUTLINE, ctx.theme().muted)
             );
         }
 
@@ -87,7 +87,7 @@ impl Widget for ButtonWidget {
                 layout.center(),
                 layout.width / 2f32,
                 Color::TRANSPARENT
-            ).with_border(2f32, ctx.ui.theme.warm1)
+            ).with_border(2f32, ctx.theme().warm1)
         );
     }
 }

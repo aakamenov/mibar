@@ -33,7 +33,7 @@ impl Widget for CpuWidget {
 
     fn draw(_state: &mut Self::State, ctx: &mut DrawCtx) {
         ctx.renderer.fill_quad(
-            Quad::rounded(ctx.layout(), ctx.ui.theme.cold1, 6f32)
+            Quad::rounded(ctx.layout(), ctx.theme().cold1, 6f32)
         );
     }
 }

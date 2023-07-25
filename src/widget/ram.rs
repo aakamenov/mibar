@@ -34,7 +34,7 @@ impl Widget for RamWidget {
 
     fn draw(_state: &mut Self::State, ctx: &mut DrawCtx) {
         ctx.renderer.fill_quad(
-            Quad::new(ctx.layout(), ctx.ui.theme.cold3)
+            Quad::new(ctx.layout(), ctx.theme().cold3)
         );
     }
 

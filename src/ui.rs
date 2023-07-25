@@ -18,7 +18,7 @@ use crate::{
         size_constraints::SizeConstraints
     },
     theme::Theme,
-    renderer::Renderer,
+    renderer::{Renderer, TextInfo},
     wayland::MouseEvent
 };
 
@@ -69,12 +69,13 @@ pub struct UiCtx {
 }
 
 pub struct LayoutCtx<'a> {
+    renderer: &'a mut Renderer,
     ui: &'a mut UiCtx
 }
 
 pub struct DrawCtx<'a> {
-    pub ui: &'a mut UiCtx,
     pub renderer: &'a mut Renderer,
+    ui: &'a mut UiCtx,
     layout: Rect
 }
 
@@ -207,6 +208,7 @@ impl Ui {
 
     fn layout_impl(&mut self) {
         let mut ctx = LayoutCtx {
+            renderer: &mut self.renderer,
             ui: &mut self.ctx
         };
 
@@ -285,6 +287,11 @@ impl<'a> LayoutCtx<'a> {
 
             size
         }
+    }
+
+    #[inline]
+    pub fn measure_text(&mut self, info: &TextInfo, size: Size) -> Size {
+        self.renderer.text_renderer.measure(info, size)
     }
 
     #[inline]
@@ -491,6 +498,11 @@ impl_context_method! {
         #[inline]
         pub fn mouse_pos(&self) -> Point {
             self.ui.mouse_pos
+        }
+
+        #[inline]
+        pub fn theme(&self) -> &Theme {
+            &self.ui.theme
         }
     }
 }

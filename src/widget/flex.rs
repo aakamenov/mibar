@@ -276,7 +276,7 @@ impl Widget for FlexWidget {
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.renderer.fill_quad(Quad::new(ctx.layout(), ctx.ui.theme.base));
+        ctx.renderer.fill_quad(Quad::new(ctx.layout(), ctx.theme().base));
 
         for (child, _) in &state.children {
             ctx.draw(child);

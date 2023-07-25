@@ -1,14 +1,19 @@
+mod text;
+
+pub use text::{TextInfo, LineHeight};
+
 use std::mem;
 
 use tiny_skia::{
     PixmapMut, PathBuilder, FillRule, Transform,
     Paint, Color, LinearGradient, Shader, Mask,
-    Stroke
+    Stroke, PixmapPaint, FilterQuality, BlendMode
 };
 
 use crate::geometry::{Rect, Point};
 
 pub struct Renderer {
+    pub(crate) text_renderer: text::Renderer,
     mask: Mask,
     commands: Vec<Command>
 }
@@ -50,13 +55,19 @@ enum Command {
 #[derive(Debug)]
 enum Primitive {
     Quad(Quad),
-    Circle(Circle)
+    Circle(Circle),
+    Text {
+        key: text::CacheKey,
+        color: Color,
+        rect: Rect
+    }
 }
 
 impl Renderer {
     #[inline]
     pub fn new() -> Self {
         Self {
+            text_renderer: text::Renderer::new(),
             mask: Mask::new(1, 1).unwrap(),
             commands: Vec::with_capacity(64)
         }
@@ -74,6 +85,14 @@ impl Renderer {
         self.commands.push(
             Command::Draw(Primitive::Circle(circle))
         );
+    }
+
+    #[inline]
+    pub fn fill_text(&mut self, info: &TextInfo, rect: Rect, color: Color) {
+        let key = self.text_renderer.ensure_is_cached(info, rect.size());
+        self.commands.push(Command::Draw(
+            Primitive::Text { key, color, rect }
+        ));
     }
 
     #[inline]
@@ -187,6 +206,23 @@ impl Renderer {
                             }
 
                             builder = path.clear();
+                        }
+                        Primitive::Text { key, color, rect } => {
+                            let texture = self.text_renderer.get_texture(key, color);
+                            let paint = PixmapPaint {
+                                opacity: 1f32,
+                                blend_mode: BlendMode::SourceOver,
+                                quality: FilterQuality::Nearest
+                            };
+                            
+                            pixmap.draw_pixmap(
+                                rect.x as i32,
+                                rect.y as i32,
+                                texture,
+                                &paint,
+                                Transform::identity(),
+                                mask
+                            );
                         }
                     }
                 }
