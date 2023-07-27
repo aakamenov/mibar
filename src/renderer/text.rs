@@ -1,10 +1,12 @@
 use std::{
     mem,
-    collections::{HashMap, hash_map::Entry},
+    num::NonZeroUsize,
+    collections::{HashMap, HashSet, hash_map::Entry},
     hash::{Hash, Hasher}
 };
 
-use ahash::{AHasher, AHashMap};
+use ahash::AHasher;
+use lru::LruCache;
 use tiny_skia::{Pixmap, PixmapRef, Color, ColorU8};
 use cosmic_text::{
     FontSystem, Buffer, Attrs, Metrics, Shaping,
@@ -13,9 +15,14 @@ use cosmic_text::{
 
 use crate::{geometry::Size, theme::Font};
 
+const GLYPH_CACHE_SIZE: usize = 64;
+const TRIM_ROUNDS: u8 = 3;
+
 pub struct Renderer {
     font_system: FontSystem,
     cache: HashMap<CacheKey, CachedText>,
+    recently_used: HashSet<CacheKey>,
+    trim_rounds: u8,
     glyph_cache: GlyphCache
 }
 
@@ -44,7 +51,7 @@ pub enum LineHeight {
 pub(super) struct CacheKey(u64);
 
 struct GlyphCache {
-    cache: AHashMap<CachedGlyphKey, CachedGlyph>
+    cache: LruCache<CachedGlyphKey, CachedGlyph>
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -72,8 +79,10 @@ impl Renderer {
         Self {
             font_system: FontSystem::new(),
             cache: HashMap::new(),
+            recently_used: HashSet::new(),
+            trim_rounds: 0,
             glyph_cache: GlyphCache {
-                cache: AHashMap::default()
+                cache: LruCache::new(NonZeroUsize::new(GLYPH_CACHE_SIZE).unwrap())
             }
         }
     }
@@ -99,6 +108,16 @@ impl Renderer {
         }
     }
 
+    pub(super) fn trim(&mut self) {
+        self.trim_rounds += 1;
+
+        if self.trim_rounds == TRIM_ROUNDS {
+            self.trim_rounds = 0;
+            self.cache.retain(|key, _| self.recently_used.contains(key));
+            self.recently_used.clear();
+        }
+    }
+
     pub(super) fn ensure_is_cached(&mut self, info: &TextInfo, size: Size) -> CacheKey {
         let key = CacheKey::new(info);
         if let Entry::Vacant(entry) = self.cache.entry(key) {
@@ -111,6 +130,7 @@ impl Renderer {
 
     pub(super) fn get_texture(&mut self, key: CacheKey, color: Color) -> PixmapRef {
         let text = self.cache.get_mut(&key).expect("must call ensure_is_cached() first");
+        self.recently_used.insert(key);
 
         // Shitty hack to appease the borrow checker.
         if let Some(same_color) = text.texture.as_ref().and_then(|x| Some(x.0 == color)) {
@@ -150,7 +170,7 @@ impl Renderer {
                 }
             }
         }
-        
+
         text.texture = Some((color, pixmap));
 
         text.texture.as_ref().unwrap().1.as_ref()
@@ -164,23 +184,27 @@ impl GlyphCache {
         cache: &mut SwashCache,
         key: CachedGlyphKey
     ) -> Option<&CachedGlyph> {
-        if let Entry::Vacant(entry) = self.cache.entry(key) {
+        struct NoGlyphImageErr;
+
+        let glyph = self.cache.try_get_or_insert(key, || {
             let Some(image) = cache.get_image_uncached(
                 font_system,
                 key.swash_key
             ) else {
-                return None;
+                return Err(NoGlyphImageErr);
             };
 
             let placement = image.placement;
 
-            let mut pixmap = Pixmap::new(placement.width, placement.height)?;
+            let mut pixmap = Pixmap::new(placement.width, placement.height)
+                .ok_or(NoGlyphImageErr)?;
+
             let pixels = pixmap.pixels_mut();
 
             match image.content {
                 SwashContent::Color => {
                     let mut i = 0;
-
+    
                     for _ in 0..placement.height {
                         for _ in 0..placement.width {
                             let color = ColorU8::from_rgba(
@@ -189,7 +213,7 @@ impl GlyphCache {
                                 image.data[i],
                                 image.data[i + 3]
                             ).premultiply();
-
+    
                             pixels[i >> 2] = color;
                             i += 4;
                         }
@@ -199,9 +223,9 @@ impl GlyphCache {
                     let r = key.color[0];
                     let g = key.color[1];
                     let b = key.color[2];
-
+    
                     let mut i = 0;
-
+    
                     for _ in 0..placement.height {
                         for _ in 0..placement.width {
                             let color = ColorU8::from_rgba(
@@ -212,7 +236,7 @@ impl GlyphCache {
                             ).premultiply();
                             
                             pixels[i] = color;
-
+    
                             i += 1;
                         }
                     }
@@ -220,13 +244,13 @@ impl GlyphCache {
                 SwashContent::SubpixelMask => { }
             }
 
-            entry.insert(CachedGlyph {
+            Ok(CachedGlyph {
                 image: pixmap,
                 placement
-            });
-        }
+            })
+        });
 
-        self.cache.get(&key)
+        glyph.ok()
     }
 }
 

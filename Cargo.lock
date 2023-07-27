@@ -268,6 +268,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eedb2bdbad7e0634f83989bf596f497b070130daaa398ab22d84c39e266deec5"
+
+[[package]]
 name = "memchr"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -315,6 +321,7 @@ version = "0.1.0"
 dependencies = [
  "ahash 0.8.3",
  "cosmic-text",
+ "lru",
  "nohash",
  "smithay-client-toolkit",
  "tiny-skia",

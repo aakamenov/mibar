@@ -209,6 +209,7 @@ impl Renderer {
                         }
                         Primitive::Text { key, color, rect } => {
                             let texture = self.text_renderer.get_texture(key, color);
+
                             let paint = PixmapPaint {
                                 opacity: 1f32,
                                 blend_mode: BlendMode::SourceOver,
@@ -243,6 +244,7 @@ impl Renderer {
 
         // Assign back the buffer in order to reuse the memory.
         self.commands = commands;
+        self.text_renderer.trim();
     }
 
     #[inline]
