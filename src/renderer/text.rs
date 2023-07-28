@@ -208,9 +208,9 @@ impl GlyphCache {
                     for _ in 0..placement.height {
                         for _ in 0..placement.width {
                             let color = ColorU8::from_rgba(
-                                image.data[i + 2],
-                                image.data[i + 1],
                                 image.data[i],
+                                image.data[i + 1],
+                                image.data[i + 2],
                                 image.data[i + 3]
                             ).premultiply();
     
@@ -229,9 +229,9 @@ impl GlyphCache {
                     for _ in 0..placement.height {
                         for _ in 0..placement.width {
                             let color = ColorU8::from_rgba(
-                                b,
-                                g,
                                 r,
+                                g,
+                                b,
                                 image.data[i]
                             ).premultiply();
                             
