@@ -180,9 +180,6 @@ impl Ui {
     }
 
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
-        assert_eq!(pixmap.width() , self.size.width as u32);
-        assert_eq!(pixmap.height() , self.size.height as u32);
-        
         if self.ctx.needs_layout {
             self.layout_impl();
         }
@@ -204,6 +201,14 @@ impl Ui {
     #[inline]
     pub fn needs_redraw(&self) -> bool {
         self.ctx.needs_redraw
+    }
+
+    #[inline]
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        if self.renderer.scale_factor() != scale_factor {
+            self.renderer.set_scale_factor(scale_factor);
+            self.ctx.needs_redraw = true;
+        }
     }
 
     fn layout_impl(&mut self) {
@@ -377,6 +382,7 @@ impl<'a> UpdateCtx<'a> {
         self.ui.needs_redraw = true;
     }
 
+    #[inline]
     pub fn request_layout(&mut self) {
         self.ui.needs_layout = true;
         self.ui.needs_redraw = true;

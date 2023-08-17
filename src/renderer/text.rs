@@ -7,7 +7,10 @@ use std::{
 
 use ahash::AHasher;
 use lru::LruCache;
-use tiny_skia::{Pixmap, PixmapRef, Color, ColorU8};
+use tiny_skia::{
+    Pixmap, PixmapRef, PixmapPaint,
+    Color, ColorU8, Transform
+};
 use cosmic_text::{
     FontSystem, Buffer, Attrs, Metrics, Shaping,
     SwashCache, SwashContent, Placement
@@ -50,9 +53,7 @@ pub enum LineHeight {
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub(super) struct CacheKey(u64);
 
-struct GlyphCache {
-    cache: LruCache<CachedGlyphKey, CachedGlyph>
-}
+struct GlyphCache(LruCache<CachedGlyphKey, CachedGlyph>);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 struct CachedGlyphKey {
@@ -81,10 +82,15 @@ impl Renderer {
             cache: HashMap::new(),
             recently_used: HashSet::new(),
             trim_rounds: 0,
-            glyph_cache: GlyphCache {
-                cache: LruCache::new(NonZeroUsize::new(GLYPH_CACHE_SIZE).unwrap())
-            }
+            glyph_cache: GlyphCache(
+                LruCache::new(NonZeroUsize::new(GLYPH_CACHE_SIZE).unwrap())
+            )
         }
+    }
+
+    pub fn invalidate(&mut self) {
+        self.cache.clear();
+        self.glyph_cache.0.clear();
     }
 
     #[inline]
@@ -128,29 +134,32 @@ impl Renderer {
         key
     }
 
-    pub(super) fn get_texture(&mut self, key: CacheKey, color: Color) -> PixmapRef {
+    pub(super) fn get_texture(
+        &mut self,
+        key: CacheKey,
+        color: Color,
+        scale_factor: f32
+    ) -> Option<PixmapRef> {
         let text = self.cache.get_mut(&key).expect("must call ensure_is_cached() first");
         self.recently_used.insert(key);
 
         // Shitty hack to appease the borrow checker.
         if let Some(same_color) = text.texture.as_ref().and_then(|x| Some(x.0 == color)) {
             if same_color {
-                return text.texture.as_ref().unwrap().1.as_ref();
+                return Some(text.texture.as_ref().unwrap().1.as_ref());
             }
         }
 
         let mut cache = SwashCache::new();
 
         let mut pixmap = Pixmap::new(
-            text.computed_size.width.ceil() as u32,
-            text.computed_size.height.ceil() as u32
-        ).unwrap();
+            (text.computed_size.width.ceil() * scale_factor) as u32,
+            (text.computed_size.height.ceil() * scale_factor) as u32
+        )?;
 
         for run in text.buffer.layout_runs() {
             for glyph in run.glyphs {
-                // TODO: Get scale factor from compositor.
-                const SCALE_FACTOR: f32 = 1f32;
-                let phys_glyph = glyph.physical((0., 0.), SCALE_FACTOR);
+                let phys_glyph = glyph.physical((0., 0.), scale_factor);
 
                 let key = CachedGlyphKey::new(phys_glyph.cache_key, color);
                 if let Some(glyph) = self.glyph_cache.get_or_create(
@@ -161,10 +170,10 @@ impl Renderer {
                     pixmap.draw_pixmap(
                         phys_glyph.x + glyph.placement.left,
                         phys_glyph.y - glyph.placement.top +
-                            (run.line_y * SCALE_FACTOR).round() as i32,
+                            (run.line_y * scale_factor) as i32,
                         glyph.image.as_ref(),
-                        &tiny_skia::PixmapPaint::default(),
-                        tiny_skia::Transform::identity(),
+                        &PixmapPaint::default(),
+                        Transform::identity(),
                         None
                     );
                 }
@@ -173,7 +182,7 @@ impl Renderer {
 
         text.texture = Some((color, pixmap));
 
-        text.texture.as_ref().unwrap().1.as_ref()
+        Some(text.texture.as_ref().unwrap().1.as_ref())
     }
 }
 
@@ -186,7 +195,7 @@ impl GlyphCache {
     ) -> Option<&CachedGlyph> {
         struct NoGlyphImageErr;
 
-        let glyph = self.cache.try_get_or_insert(key, || {
+        let glyph = self.0.try_get_or_insert(key, || {
             let Some(image) = cache.get_image_uncached(
                 font_system,
                 key.swash_key
@@ -200,7 +209,6 @@ impl GlyphCache {
                 .ok_or(NoGlyphImageErr)?;
 
             let pixels = pixmap.pixels_mut();
-
             match image.content {
                 SwashContent::Color => {
                     let mut i = 0;

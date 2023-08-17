@@ -14,6 +14,7 @@ use crate::geometry::{Rect, Point};
 
 pub struct Renderer {
     pub(crate) text_renderer: text::Renderer,
+    scale_factor: f32,
     mask: Mask,
     commands: Vec<Command>
 }
@@ -67,10 +68,22 @@ impl Renderer {
     #[inline]
     pub fn new() -> Self {
         Self {
+            scale_factor: 1f32,
             text_renderer: text::Renderer::new(),
             mask: Mask::new(1, 1).unwrap(),
             commands: Vec::with_capacity(64)
         }
+    }
+
+    #[inline]
+    pub fn scale_factor(&mut self) -> f32 {
+        self.scale_factor
+    }
+    
+    #[inline]
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        self.scale_factor = scale_factor;
+        self.text_renderer.invalidate();
     }
 
     #[inline]
@@ -118,6 +131,11 @@ impl Renderer {
         let mut mask_path = PathBuilder::new();
         let mut builder = PathBuilder::new();
 
+        let transform = Transform::from_scale(
+            self.scale_factor,
+            self.scale_factor
+        );
+
         let mut commands = mem::take(&mut self.commands);
         for command in commands.drain(..) {
             match command {
@@ -148,7 +166,7 @@ impl Renderer {
                                 &path,
                                 &paint,
                                 FillRule::EvenOdd,
-                                Transform::identity(),
+                                transform,
                                 mask
                             );
 
@@ -162,7 +180,7 @@ impl Renderer {
                                     &path,
                                     &paint,
                                     &stroke,
-                                    Transform::identity(),
+                                    transform,
                                     mask
                                 )
                             }
@@ -186,7 +204,7 @@ impl Renderer {
                                 &path,
                                 &paint,
                                 FillRule::EvenOdd,
-                                Transform::identity(),
+                                transform,
                                 mask
                             );
 
@@ -200,7 +218,7 @@ impl Renderer {
                                     &path,
                                     &paint,
                                     &stroke,
-                                    Transform::identity(),
+                                    transform,
                                     mask
                                 )
                             }
@@ -208,33 +226,38 @@ impl Renderer {
                             builder = path.clear();
                         }
                         Primitive::Text { key, color, rect } => {
-                            let texture = self.text_renderer.get_texture(key, color);
-
-                            let paint = PixmapPaint {
-                                opacity: 1f32,
-                                blend_mode: BlendMode::SourceOver,
-                                quality: FilterQuality::Nearest
-                            };
-                            
-                            pixmap.draw_pixmap(
-                                rect.x as i32,
-                                rect.y as i32,
-                                texture,
-                                &paint,
-                                Transform::identity(),
-                                mask
-                            );
+                            if let Some(texture) = self.text_renderer.get_texture(
+                                key,
+                                color,
+                                self.scale_factor
+                            ) {
+                                let paint = PixmapPaint {
+                                    opacity: 1f32,
+                                    blend_mode: BlendMode::SourceOver,
+                                    quality: FilterQuality::Nearest
+                                };
+                                
+                                pixmap.draw_pixmap(
+                                    (rect.x * self.scale_factor) as i32,
+                                    (rect.y * self.scale_factor) as i32,
+                                    texture,
+                                    &paint,
+                                    // Glyph images are scaled by cosmic-text
+                                    Transform::identity(),
+                                    mask
+                                );
+                            }
                         }
                     }
                 }
                 Command::Clip(rect) => {
                     has_clip = true;
                     clip_stack.push(rect);
-                    mask_path = self.adjust_clip_mask(mask_path, rect);
+                    mask_path = self.adjust_clip_mask(mask_path, rect, transform);
                 }
                 Command::PopClip => {
                     if let Some(clip) = clip_stack.pop() {
-                        mask_path = self.adjust_clip_mask(mask_path, clip);
+                        mask_path = self.adjust_clip_mask(mask_path, clip, transform);
                     }
 
                     has_clip = !clip_stack.is_empty();
@@ -251,7 +274,8 @@ impl Renderer {
     fn adjust_clip_mask(
         &mut self,
         mut builder: PathBuilder,
-        clip: Rect
+        clip: Rect,
+        transform: Transform
     ) -> PathBuilder {
         self.mask.clear();
 
@@ -262,7 +286,7 @@ impl Renderer {
             &path,
             FillRule::EvenOdd,
             false,
-            Transform::identity()
+            transform
         );
 
         path.clear()

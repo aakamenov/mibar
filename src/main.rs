@@ -96,6 +96,8 @@ async fn main() {
 fn process_events(ui: &mut Ui, events: Vec<WaylandEvent>) {
     for event in events {
         match event {
+            WaylandEvent::ScaleFactor(scale_factor) =>
+                ui.set_scale_factor(scale_factor),
             WaylandEvent::Resize(size) =>
                 ui.layout(Size {
                     width: size.0 as f32,

@@ -41,6 +41,7 @@ use crate::geometry::Point;
 
 #[derive(Debug)]
 pub enum WaylandEvent {
+    ScaleFactor(f32),
     Resize((u32, u32)),
     Mouse(MouseEvent)
 }
@@ -72,6 +73,18 @@ pub struct BarWindow {
     supports_abgr: bool
 }
 
+#[derive(Debug)]
+struct Monitor {
+    output: Option<wl_output::WlOutput>,
+    viewport: Viewport
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Viewport {
+    logical_size: (u32, u32),
+    scale_factor: f32
+}
+
 struct State {
     registry_state: RegistryState,
     seat_state: SeatState,
@@ -82,7 +95,7 @@ struct State {
     pool: SlotPool,
     buffer: Option<Buffer>,
     shm: Shm,
-    size: (u32, u32),
+    monitor: Monitor,
     pending_events: Vec<WaylandEvent>
 }
 
@@ -93,8 +106,8 @@ impl BarWindow {
         let qh: QueueHandle<State> = event_queue.handle();
     
         // Initialize xdg_shell handlers so we can select the correct adapter
-        let compositor_state =
-            CompositorState::bind(&globals, &qh).expect("wl_compositor not available");
+        let compositor_state = CompositorState::bind(&globals, &qh)
+            .expect("wl_compositor not available");
     
         let layer_shell = LayerShell::bind(&globals, &qh)
             .expect("Compositor does not support the zwlr_layer_shell_v1 protocol.");
@@ -110,7 +123,7 @@ impl BarWindow {
             Option::<String>::None,
             None
         );
-    
+
         let pool = SlotPool::new(256 * 256 * 4, &shm)
             .expect("Failed to create a shared memory pool.");
 
@@ -128,14 +141,22 @@ impl BarWindow {
                 buffer: None,
                 layer_shell,
                 layer_surface,
-                size: (256, 256),
+                monitor: Monitor {
+                    output: None,
+                    viewport: Viewport {
+                        logical_size: (256, 256),
+                        scale_factor: 1f32
+                    }
+                },
                 pending_events: vec![]
             }
         }
     }
 
     pub fn events_blocking(&mut self) -> Vec<WaylandEvent> {
-        self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+        if self.state.pending_events.is_empty() {
+            self.event_queue.blocking_dispatch(&mut self.state).unwrap();
+        }
 
         mem::take(&mut self.state.pending_events)
     }
@@ -165,8 +186,23 @@ impl BarWindow {
         &mut self,
         func: impl FnOnce(&mut [u8], (u32, u32))
     ) {
-        let width = self.state.size.0;
-        let height = self.state.size.1;
+        if self.state.monitor.output.is_none() {
+            return;
+        }
+
+        let Viewport {
+            logical_size,
+            scale_factor
+        } = self.state.monitor.viewport;
+
+        let scale_factor = scale_factor as u32;
+        let buffer_size = (
+            logical_size.0 * scale_factor,
+            logical_size.1 * scale_factor
+        );
+        let width = buffer_size.0;
+        let height = buffer_size.1;
+
         let stride = width as i32 * 4;
 
         let format = if self.supports_abgr {
@@ -201,7 +237,7 @@ impl BarWindow {
             }
         };
 
-        func(canvas, self.state.size);
+        func(canvas, buffer_size);
 
         if !self.supports_abgr {
             assert_eq!(canvas.len() % 4, 0);
@@ -218,14 +254,8 @@ impl BarWindow {
         }
 
         let surface = self.state.layer_surface.wl_surface();
-
-        // Damage the entire window
         surface.damage_buffer(0, 0, width as i32, height as i32);
-
-        // Request our next frame
         surface.frame(&self.event_queue.handle(), surface.clone());
-
-        // Attach and commit to present.
         buffer.attach_to(surface).expect("buffer attach");
 
         self.state.layer_surface.commit();
@@ -237,10 +267,28 @@ impl CompositorHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _new_factor: i32,
+        surface: &wl_surface::WlSurface,
+        new_factor: i32,
     ) {
+        if self.layer_surface.wl_surface() != surface {
+            return;
+        }
+
+        let new_factor = new_factor as f32;
+        let viewport = &mut self.monitor.viewport;
         
+        if new_factor == viewport.scale_factor {
+            return;
+        }
+
+        viewport.scale_factor = new_factor;
+
+        self.buffer = None;
+        self.layer_surface.set_buffer_scale(new_factor as u32).unwrap();
+
+        self.pending_events.push(
+            WaylandEvent::ScaleFactor(new_factor)
+        );
     }
 
     fn frame(
@@ -262,20 +310,30 @@ impl OutputHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        output: wl_output::WlOutput,
+        output: wl_output::WlOutput
     ) {
+        if self.monitor.output.is_some() {
+            return;
+        }
+
         let Some(info) = self.output_state.info(&output) else {
             return;
         };
 
-        let Some(size) = info.logical_size else {
-            return;
-        };
+        let dimensions = info.modes[0].dimensions;
+        let logical_size = info.logical_size.unwrap_or_else(||
+            (
+                dimensions.0 / info.scale_factor,
+                dimensions.1 / info.scale_factor
+            )
+        );
+
+        self.monitor.output = Some(output);
 
         println!("New output: {:?}", info);
 
         self.layer_surface.set_anchor(Anchor::BOTTOM);
-        self.layer_surface.set_size(size.0 as u32, 40);
+        self.layer_surface.set_size(logical_size.0 as u32, 40);
         self.layer_surface.set_exclusive_zone(40);
         self.layer_surface.commit();
     }
@@ -293,9 +351,11 @@ impl OutputHandler for State {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        output: wl_output::WlOutput,
+        output: wl_output::WlOutput
     ) {
-        println!("Output destroyed: {:?}", output);
+        if self.monitor.output.as_ref().map_or(false, |x| *x == output) {
+            self.monitor.output = None;
+        }
     }
 }
 
@@ -328,14 +388,17 @@ impl LayerShellHandler for State {
         // if it doesn't resize or pick a smaller size.
         //
         // Therefore, we only care when a bigger size has been assigned.
-        // But it seems that this can't even happen in our case. 
-        if configure.new_size.0 <= self.size.0 &&
-            configure.new_size.1 <= self.size.1 {
+        // But it seems that this can't even happen in our case.
+        let viewport = &mut self.monitor.viewport;
+        if configure.new_size.0 <= viewport.logical_size.0 &&
+            configure.new_size.1 <= viewport.logical_size.1 {
             return;
         }
 
-        self.size = configure.new_size;
-        self.pending_events.push(WaylandEvent::Resize(self.size)); 
+        viewport.logical_size = configure.new_size;
+        
+        self.buffer = None;
+        self.pending_events.push(WaylandEvent::Resize(configure.new_size));
     }
 }
 

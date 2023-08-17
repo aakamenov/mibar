@@ -1,6 +1,6 @@
 use crate::{
     geometry::Size,
-    ui::{InitCtx, DrawCtx, LayoutCtx},
+    ui::{InitCtx, DrawCtx, LayoutCtx, UpdateCtx},
     renderer::TextInfo,
     theme::Font
 };
@@ -16,6 +16,10 @@ pub struct Text {
 }
 
 pub struct TextWidget;
+
+pub enum Message {
+    SetText(String)
+}
 
 pub struct State {
     info: TextInfo  
@@ -48,7 +52,7 @@ impl Text {
 
 impl Element for Text {
     type Widget = TextWidget;
-    type Message = ();
+    type Message = Message;
 
     fn make_widget(self, ctx: &mut InitCtx) -> (
         Self::Widget,
@@ -63,6 +67,19 @@ impl Element for Text {
         );
 
         (TextWidget, State { info })
+    }
+
+    fn message(
+        state: &mut <Self::Widget as Widget>::State,
+        ctx: &mut UpdateCtx,
+        msg: Self::Message
+    ) {
+        match msg {
+            Message::SetText(text) => {
+                state.info.text = text;
+                ctx.request_layout();
+            }
+        }
     }
 }
 
