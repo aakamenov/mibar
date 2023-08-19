@@ -73,6 +73,7 @@ pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
         const OPEN_WINDOW: &str = "openwindow>>";
         const CLOSE_WINDOW: &str = "closewindow>>";
 
+        let mut updated_workspaces = false;
         for line in text.lines() {
             // Check if the event explicitly starts with workspace>>
             // otherwise we erroneously parse events like destroyworkspace>>
@@ -82,16 +83,23 @@ pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
             {
                 current = new_current;
 
-                if let Some(workspaces) = get_workspaces(&mut buf, &mut workspaces_bytes).await {
-                    let event = WorkspacesChanged {
-                        current,
-                        workspaces
-                    };
+                if !updated_workspaces {
+                    if let Some(workspaces) = get_workspaces(&mut buf, &mut workspaces_bytes).await {
+                        let event = WorkspacesChanged {
+                            current,
+                            workspaces
+                        };
 
-                    sender.send(event).await;
-                    break;
+                        sender.send(event).await;
+                    }
                 }
-            } else if line.starts_with(OPEN_WINDOW) || line.starts_with(CLOSE_WINDOW) {
+
+                break;
+
+            } else if !updated_workspaces &&
+                (line.starts_with(OPEN_WINDOW) ||
+                line.starts_with(CLOSE_WINDOW))
+            {
                 if let Some(workspaces) = get_workspaces(&mut buf, &mut workspaces_bytes).await {
                     let event = WorkspacesChanged {
                         current,
@@ -99,7 +107,7 @@ pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
                     };
 
                     sender.send(event).await;
-                    break;
+                    updated_workspaces = true;
                 }
             }   
         }
