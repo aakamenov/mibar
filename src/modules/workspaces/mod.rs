@@ -1,9 +1,9 @@
 mod hyprland;
 mod button;
 
-use std::any::Any;
+use std::{any::Any, mem::MaybeUninit};
 
-use hyprland::{Workspace, start_listener_loop};
+use hyprland::{WorkspacesChanged, start_listener_loop};
 
 use crate::{
     geometry::Size,
@@ -16,21 +16,13 @@ use crate::{
 };
 
 const WORKSPACE_COUNT: usize = 8;
-const SPACING: f32 = 3f32;
+const SPACING: f32 = 4f32;
 
 pub struct Workspaces;
 pub struct WorkspacesWidget;
 
 pub struct State {
-    buttons: Vec<TypedId<button::Button>>
-}
-
-impl State {
-    pub fn new() -> Self {
-        Self {
-            buttons: Vec::new()
-        }
-    }
+    buttons: [TypedId<button::Button>; WORKSPACE_COUNT]
 }
 
 impl Element for Workspaces {
@@ -41,11 +33,22 @@ impl Element for Workspaces {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        ctx.task_with_sender(|sender: ValueSender<Vec<Workspace>>| {
+        ctx.task_with_sender(|sender: ValueSender<WorkspacesChanged>| {
             start_listener_loop(sender)
         });
 
-        (WorkspacesWidget, State::new())
+        let mut buttons: MaybeUninit<[TypedId<button::Button>; WORKSPACE_COUNT]> =
+            MaybeUninit::uninit();
+
+        for i in 0..WORKSPACE_COUNT {
+            let button = ctx.new_child(button::Button);
+            unsafe {
+                buttons.assume_init_mut()[i] = button;
+            }
+        }
+
+        let buttons = unsafe { buttons.assume_init() };
+        (WorkspacesWidget, State { buttons })
     }
 }
 
@@ -59,18 +62,35 @@ impl Widget for WorkspacesWidget {
     }
 
     fn task_result(state: &mut Self::State, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
-        let workspaces = data.downcast::<Vec<Workspace>>().unwrap();
+        let event = data.downcast::<WorkspacesChanged>().unwrap();
+        let mut empty = [true; WORKSPACE_COUNT];
 
-        for button in state.buttons.drain(..) {
-            ctx.dealloc_child(button);
+        for workspace in event.workspaces {
+            let index = (workspace.id - 1) as usize;
+            if index >= WORKSPACE_COUNT {
+                continue;
+            }
+
+            empty[index] = false;
+
+            let msg = button::WorkspaceStatus {
+                is_current: workspace.id == event.current,
+                num_windows: workspace.num_windows
+            };
+            ctx.message(&state.buttons[index], msg);
         }
 
-        for _ in 0..workspaces.len() {
-            let id = ctx.new_child(button::Button);
-            state.buttons.push(id);
-        }
+        for (i, is_empty) in empty.into_iter().enumerate() {
+            if !is_empty {
+                continue;
+            }
 
-        ctx.request_layout();
+            let msg = button::WorkspaceStatus {
+                is_current: i + 1 == event.current as usize,
+                num_windows: 0
+            };
+            ctx.message(&state.buttons[i], msg);
+        }
     }
 
     fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {

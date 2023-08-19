@@ -7,10 +7,15 @@ use tokio::{
 
 use crate::ui::ValueSender;
 
+pub struct WorkspacesChanged {
+    pub current: u8,
+    pub workspaces: Vec<Workspace>
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Workspace {
-    id: u8,
-    num_windows: u8
+    pub id: u8,
+    pub num_windows: u8
 }
 
 enum SocketType {
@@ -18,7 +23,7 @@ enum SocketType {
     Write
 }
 
-pub async fn start_listener_loop(sender: ValueSender<Vec<Workspace>>) {
+pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
     // Opening the write stream here together with the read stream causes the
     // compositor to freeze, so we open it every time we want to dispatch events instead.
     let Some(mut read_stream) = open_stream(SocketType::Read).await else {
@@ -27,15 +32,25 @@ pub async fn start_listener_loop(sender: ValueSender<Vec<Workspace>>) {
 
     let mut retries = 0;
     let mut buf = [0; 2048];
-    let mut bytes = vec![];
+    let mut event_bytes = Vec::with_capacity(256);
+    let mut workspaces_bytes = Vec::with_capacity(1024);
+
+    // Last known selected workspace ID. We store this because
+    // only the workspace>> event notifies us of a change.
+    let mut current = 1;
 
     // Send an initial value.
-    if let Some(workspaces) = get_workspaces(&mut buf, &mut bytes).await {
-        sender.send(workspaces).await;
+    if let Some(workspaces) = get_workspaces(&mut buf, &mut workspaces_bytes).await {
+        let event = WorkspacesChanged {
+            current,
+            workspaces
+        };
+
+        sender.send(event).await;
     }
 
     loop {
-        match read_all(&mut read_stream, &mut buf, &mut bytes).await {
+        match read_all(&mut read_stream, &mut buf, &mut event_bytes).await {
             Ok(()) => retries = 0,
             Err(err) => {
                 retries += 1;
@@ -51,17 +66,42 @@ pub async fn start_listener_loop(sender: ValueSender<Vec<Workspace>>) {
         };
 
         let text = unsafe {
-            str::from_utf8_unchecked(&bytes)
+            str::from_utf8_unchecked(&event_bytes)
         };
 
         const WORKSPACE: &str = "workspace>>";
+        const OPEN_WINDOW: &str = "openwindow>>";
+        const CLOSE_WINDOW: &str = "closewindow>>";
 
-        if !text.contains(WORKSPACE) {
-            continue;
-        }
+        for line in text.lines() {
+            // Check if the event explicitly starts with workspace>>
+            // otherwise we erroneously parse events like destroyworkspace>>
+            if let Some(new_current) = line.starts_with(WORKSPACE)
+                .then(|| parse_u8(line, &mut 0, '\n' as u8, WORKSPACE))
+                .flatten()
+            {
+                current = new_current;
 
-        if let Some(workspaces) = get_workspaces(&mut buf, &mut bytes).await {
-            sender.send(workspaces).await;
+                if let Some(workspaces) = get_workspaces(&mut buf, &mut workspaces_bytes).await {
+                    let event = WorkspacesChanged {
+                        current,
+                        workspaces
+                    };
+
+                    sender.send(event).await;
+                    break;
+                }
+            } else if line.starts_with(OPEN_WINDOW) || line.starts_with(CLOSE_WINDOW) {
+                if let Some(workspaces) = get_workspaces(&mut buf, &mut workspaces_bytes).await {
+                    let event = WorkspacesChanged {
+                        current,
+                        workspaces
+                    };
+
+                    sender.send(event).await;
+                    break;
+                }
+            }   
         }
     }
 }
@@ -149,7 +189,7 @@ fn parse_u8(
 fn advance_until(bytes: &[u8], stop_char: u8) -> usize {
     let mut index = 0;
         
-    while bytes[index] != stop_char {
+    while index < bytes.len() && bytes[index] != stop_char {
         index += 1;
     }
 
