@@ -41,7 +41,7 @@ impl Element for Workspaces {
             MaybeUninit::uninit();
 
         for i in 0..WORKSPACE_COUNT {
-            let button = ctx.new_child(button::Button);
+            let button = ctx.new_child(button::Button::new((i + 1) as u8));
             unsafe {
                 buttons.assume_init_mut()[i] = button;
             }

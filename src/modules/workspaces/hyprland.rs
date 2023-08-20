@@ -114,19 +114,34 @@ pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
     }
 }
 
+pub async fn change_workspace(id: u8) {
+    let cmd = format!("dispatch workspace {id}");
+    let mut buf = [0u8; 64];
+
+    let Some(mut write_stream) = dispatch(cmd.as_bytes()).await else {
+        return;
+    };
+
+    match write_stream.read(&mut buf).await {
+        Ok(read) => {
+            let resp = unsafe {
+                str::from_utf8_unchecked(&buf[0..read])
+            };
+
+            if resp != "ok" {
+                eprintln!("Received error from Hyprland dispatch: {resp}");
+            }
+        },
+        Err(err) => {
+            eprintln!("Error reading Hyprland response: {err}")
+        }
+    }
+}
+
 async fn get_workspaces(buf: &mut [u8], bytes: &mut Vec<u8>) -> Option<Vec<Workspace>> {
     const CMD: &str = "/workspaces";
 
-    let Some(mut write_stream) = open_stream(SocketType::Write).await else {
-        return None;
-    };
-
-    if let Err(err) = write_stream.write_all(CMD.as_bytes()).await {
-        eprintln!("Failed to write to Hyprland command socket: {err}");
-
-        return None;
-    }
-
+    let mut write_stream = dispatch(CMD.as_bytes()).await?;
     match read_all(&mut write_stream, buf, bytes).await {
         Ok(_) => {
             let text = unsafe {
@@ -141,6 +156,17 @@ async fn get_workspaces(buf: &mut [u8], bytes: &mut Vec<u8>) -> Option<Vec<Works
             None
         }
     }
+}
+
+async fn dispatch(cmd: &[u8]) -> Option<UnixStream> {
+    let mut write_stream = open_stream(SocketType::Write).await?;
+    if let Err(err) = write_stream.write_all(cmd).await {
+        eprintln!("Failed to write to Hyprland command socket: {err}");
+
+        return None;
+    }
+
+    Some(write_stream)
 }
 
 fn parse_workspaces(text: &str) -> Vec<Workspace> {
@@ -168,9 +194,7 @@ fn parse_u8(
     stop_char: u8,
     pat: &'static str
 ) -> Option<u8> {
-    let Some(index) = text[*cursor..].find(pat) else {
-        return None;
-    };
+    let index = text[*cursor..].find(pat)?;
 
     *cursor += index + pat.len();
     let (_, num_start) = text.split_at(*cursor);
@@ -226,10 +250,7 @@ async fn read_all(
 }
 
 async fn open_stream(ty: SocketType) -> Option<UnixStream> {
-    let Some(socket) = hyprland_socket(ty) else {
-        return None;
-    };
-
+    let socket = hyprland_socket(ty)?;
     let stream = match UnixStream::connect(socket).await {
         Ok(stream) => stream,
         Err(err) => {
