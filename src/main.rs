@@ -6,6 +6,7 @@ mod renderer;
 mod bar;
 mod wayland;
 mod modules;
+mod sys_info;
 
 use tiny_skia::PixmapMut;
 use tokio::{

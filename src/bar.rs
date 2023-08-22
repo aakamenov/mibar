@@ -1,7 +1,9 @@
 use crate::{
-    modules::Workspaces,
+    modules::{
+        Workspaces,
+        DateTime
+    },
     widget::{
-        date_time::DateTime,
         music::Music,
         cpu::Cpu,
         ram::Ram,
