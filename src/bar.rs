@@ -1,11 +1,11 @@
 use crate::{
     modules::{
         Workspaces,
-        DateTime
+        DateTime,
+        Cpu
     },
     widget::{
         music::Music,
-        cpu::Cpu,
         ram::Ram,
         flex::{Flex, FlexBuilder, Alignment},
         Element

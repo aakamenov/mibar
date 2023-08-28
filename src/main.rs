@@ -22,6 +22,8 @@ use crate::{
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {
+    sys_info::init();
+    
     let mut window = BarWindow::new();
 
     // TODO: It'd be more efficient to process multiple results at once.

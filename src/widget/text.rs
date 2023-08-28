@@ -76,8 +76,10 @@ impl Element for Text {
     ) {
         match msg {
             Message::SetText(text) => {
-                state.info.text = text;
-                ctx.request_layout();
+                if text != state.info.text {
+                    state.info.text = text;
+                    ctx.request_layout();
+                }
             }
         }
     }

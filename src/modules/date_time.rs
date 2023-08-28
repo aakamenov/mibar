@@ -5,12 +5,12 @@ use crate::{
     geometry::Size,
     widget::{
         size_constraints::SizeConstraints,
-        Element, Widget
+        Element, Widget, text::{self, Text}
     },
-    renderer::TextInfo,
     sys_info::Date,
     ui::{
-        InitCtx, DrawCtx, LayoutCtx, UpdateCtx
+        InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+        TypedId
     }
 };
 
@@ -19,7 +19,7 @@ pub struct DateTime;
 pub struct DateTimeWidget;
 
 pub struct State {
-    info: TextInfo
+    text: TypedId<Text>
 }
 
 fn get_time() -> (String, i32) {
@@ -54,7 +54,7 @@ impl Element for DateTime {
         
         let (date, remaining) = get_time();
         let state = State {
-            info: TextInfo::new(date, ctx.theme().font_size)
+            text: ctx.new_child(Text::new(date))
         };
 
         ctx.task(async move {
@@ -70,24 +70,22 @@ impl Widget for DateTimeWidget {
     type State = State;
 
     fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
-        let size = ctx.measure_text(&state.info, bounds.max);
-
-        bounds.constrain(size)
+        ctx.layout(&state.text, bounds)
     }
 
     fn task_result(state: &mut Self::State, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
         let result = data.downcast::<(String, i32)>().unwrap();
-        state.info.text = result.0;
-        ctx.request_layout();
 
         let remaining = result.1;
         ctx.task(async move {
             sleep(Duration::from_secs(remaining as u64)).await;
             get_time()
         });
+
+        ctx.message(&state.text, text::Message::SetText(result.0));
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.renderer.fill_text(&state.info, ctx.layout(), ctx.theme().text);
+        ctx.draw(&state.text);
     }
 }

@@ -51,7 +51,7 @@ impl Element for Button {
     type Widget = ButtonWidget;
     type Message = WorkspaceStatus;
 
-    fn make_widget(self, _ctx: &mut InitCtx) -> (
+    fn make_widget(self, ctx: &mut InitCtx) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
@@ -59,7 +59,8 @@ impl Element for Button {
             id: self.id,
             is_focused: false,
             is_hovered: false,
-            text_info: TextInfo::new("0", TEXT_SIZE),
+            text_info: TextInfo::new("0", TEXT_SIZE)
+                .with_font(ctx.theme().font),
             text_size: Size::ZERO,
             status: WorkspaceStatus::default()
         };

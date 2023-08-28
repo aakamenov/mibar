@@ -30,7 +30,10 @@ impl Theme {
     #[inline]
     pub fn light() -> Self {
         Self {
-            font: Font::default(),
+            font: Font {
+                family: Family::Name("SauceCodePro Nerd Font"),
+                ..Font::default()
+            },
             font_size: 16f32,
             base: Color::from_rgba8(250, 244, 237, 255),
             surface: Color::from_rgba8(255, 250, 243, 255),

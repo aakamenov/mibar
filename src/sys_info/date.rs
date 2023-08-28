@@ -18,7 +18,7 @@ pub struct Date {
     pub seconds: i32,
     /// The number of minutes after the hour, in the range 0 to 59.
     pub minutes: i32,
-    /// The number of hours past midnight, in the range 0 to 23. 
+    /// The number of hours past midnight, in the range 0 to 23.
     pub hours: i32,
     /// The day of the month, in the range 1 to 31.
     pub day_of_month: i32,
@@ -52,7 +52,7 @@ impl Date {
         const DAYS_IN_MONTH: [u8; 12] = [31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 31, 29];
 
         // Reject values whose year would overflow an int
-	    if timestamp < i32::MIN as i64 * 31622400 ||
+        if timestamp < i32::MIN as i64 * 31622400 ||
             timestamp > i32::MAX as i64 * 31622400
         {
             return None;
