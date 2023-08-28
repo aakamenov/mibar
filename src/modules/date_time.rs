@@ -32,7 +32,7 @@ fn get_time() -> (String, i32) {
     };
 
     let date_string = format!(
-        "{}:{} {} {}/{}",
+        "{:02}:{:02} {} {}/{}",
         date.hours,
         date.minutes,
         WEEKDAYS[date.day_of_week as usize],
