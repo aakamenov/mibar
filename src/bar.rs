@@ -1,6 +1,6 @@
 use crate::{
     modules::{
-        Workspaces, DateTime, Cpu, Ram
+        Workspaces, DateTime, Cpu, Ram, Battery
     },
     widget::{
         music::Music,
@@ -30,6 +30,7 @@ pub fn build() -> impl Element {
         builder.add_flex(middle, 2f32);
 
         let right = Flex::row(|builder| {
+            builder.add_non_flex(Battery);
             builder.add_non_flex(Cpu);
             builder.add_non_flex(Ram);
         })

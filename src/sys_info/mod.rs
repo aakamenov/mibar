@@ -1,3 +1,4 @@
+pub mod battery;
 mod date;
 mod cpu;
 mod ram;
