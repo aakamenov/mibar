@@ -1,12 +1,9 @@
 use crate::{
     modules::{
-        Workspaces,
-        DateTime,
-        Cpu
+        Workspaces, DateTime, Cpu, Ram
     },
     widget::{
         music::Music,
-        ram::Ram,
         flex::{Flex, FlexBuilder, Alignment},
         Element
     }
