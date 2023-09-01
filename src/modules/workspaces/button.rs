@@ -1,7 +1,5 @@
 use std::any::Any;
 
-use tiny_skia::Color;
-
 use crate::{
     wayland::{MouseEvent, MouseButton},
     geometry::{Size, Rect},
@@ -10,7 +8,9 @@ use crate::{
         InitCtx, DrawCtx, LayoutCtx,
         UpdateCtx, Event
     },
-    renderer::{Circle, TextInfo}
+    draw::Circle,
+    renderer::TextInfo,
+    color::Color
 };
 use super::hyprland;
 
@@ -167,12 +167,16 @@ impl Widget for ButtonWidget {
             color
         } else if state.is_focused {
             let mut color = color.clone();
-            color.apply_opacity(FOCUS_OPACITY);
+            unsafe {
+                color.apply_opacity_unchecked(FOCUS_OPACITY);
+            }
 
             color
         } else if state.is_hovered {
             let mut color = color.clone();
-            color.apply_opacity(HOVER_OPACITY);
+            unsafe {
+                color.apply_opacity_unchecked(HOVER_OPACITY);
+            }
 
             color
         } else {

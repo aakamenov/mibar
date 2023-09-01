@@ -5,7 +5,9 @@ use crate::{
         Element, Widget
     },
     ui::{InitCtx, DrawCtx, LayoutCtx, ValueSender},
-    renderer::{Quad, TextInfo},
+    renderer::TextInfo,
+    color::Color,
+    draw::Quad,
     sys_info::battery
 };
 
@@ -141,7 +143,7 @@ impl Widget for BatteryWidget {
         body.set_size(BODY_SIZE);
 
         ctx.renderer.fill_quad(
-            Quad::rounded(body, tiny_skia::Color::TRANSPARENT, BODY_RADIUS)
+            Quad::rounded(body, Color::TRANSPARENT, BODY_RADIUS)
                 .with_border(2f32, body_color)
         );
 

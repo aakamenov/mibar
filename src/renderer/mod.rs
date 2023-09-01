@@ -6,44 +6,21 @@ use std::mem;
 
 use tiny_skia::{
     PixmapMut, PathBuilder, FillRule, Transform,
-    Paint, Color, LinearGradient, Shader, Mask,
-    Stroke, PixmapPaint, FilterQuality, BlendMode
+    Paint, Shader, Mask, Stroke, PixmapPaint,
+    FilterQuality, BlendMode
 };
 
-use crate::geometry::{Rect, Point};
+use crate::{
+    geometry::{Rect, Point},
+    color::Color,
+    draw::{Quad, Circle, BorderRadius, Background}
+};
 
 pub struct Renderer {
     pub(crate) text_renderer: text::Renderer,
     scale_factor: f32,
     mask: Mask,
     commands: Vec<Command>
-}
-
-#[derive(Clone, Debug)]
-pub enum Background {
-    Color(Color),
-    LinearGradient(LinearGradient)
-}
-
-#[derive(Default, Clone, Copy, PartialEq, PartialOrd, Debug)]
-pub struct BorderRadius(pub [f32; 4]);
-
-#[derive(Clone, Debug)]
-pub struct Quad {
-    pub rect: Rect,
-    pub background: Background,
-    pub border_radius: BorderRadius,
-    pub border_width: f32,
-    pub border_color: Background
-}
-
-#[derive(Clone, Debug)]
-pub struct Circle {
-    pub pos: Point,
-    pub radius: f32,
-    pub background: Background,
-    pub border_width: f32,
-    pub border_color: Background
 }
 
 #[derive(Debug)]
@@ -55,11 +32,23 @@ enum Command {
 
 #[derive(Debug)]
 enum Primitive {
-    Quad(Quad),
-    Circle(Circle),
+    Quad {
+        rect: Rect,
+        background: Shader<'static>,
+        border_radius: BorderRadius,
+        border_width: f32,
+        border_color: Shader<'static>
+    },
+    Circle {
+        pos: Point,
+        radius: f32,
+        background: Shader<'static>,
+        border_width: f32,
+        border_color: Shader<'static>
+    },
     Text {
         key: text::CacheKey,
-        color: Color,
+        color: tiny_skia::Color,
         rect: Rect
     }
 }
@@ -89,14 +78,26 @@ impl Renderer {
     #[inline]
     pub fn fill_quad(&mut self, quad: Quad) {
         self.commands.push(
-            Command::Draw(Primitive::Quad(quad))
+            Command::Draw(Primitive::Quad {
+                rect: quad.rect,
+                background: quad.background.into(),
+                border_radius: quad.border_radius,
+                border_width: quad.border_width,
+                border_color: quad.border_color.into()
+            })
         );
     }
 
     #[inline]
     pub fn fill_circle(&mut self, circle: Circle) {
         self.commands.push(
-            Command::Draw(Primitive::Circle(circle))
+            Command::Draw(Primitive::Circle {
+                pos: circle.pos,
+                radius: circle.radius,
+                background: circle.background.into(),
+                border_width: circle.border_width,
+                border_color: circle.border_color.into()
+            })
         );
     }
 
@@ -104,7 +105,7 @@ impl Renderer {
     pub fn fill_text(&mut self, info: &TextInfo, rect: Rect, color: Color) {
         let key = self.text_renderer.ensure_is_cached(info, rect.size());
         self.commands.push(Command::Draw(
-            Primitive::Text { key, color, rect }
+            Primitive::Text { key, color: color.into(), rect }
         ));
     }
 
@@ -143,24 +144,30 @@ impl Renderer {
                     let mask = has_clip.then_some(&self.mask);
 
                     match primitive {
-                        Primitive::Quad(quad) => {
-                            let radius = quad.border_radius.0;
+                        Primitive::Quad {
+                            rect,
+                            background,
+                            border_radius,
+                            border_width,
+                            border_color
+                        } => {
+                            let radius = border_radius.0;
 
                             if radius[0] +
                                 radius[1] +
                                 radius[2] +
                                 radius[3] > 0f32
                             {
-                                rounded_rect(&mut builder, quad.rect, radius)
+                                rounded_rect(&mut builder, rect, radius)
                             } else {
-                                builder.push_rect(quad.rect.into());
+                                builder.push_rect(rect.into());
                             }
 
                             let path = builder.finish().unwrap();
 
                             let mut paint = Paint::default();
                             paint.anti_alias = true;
-                            paint.shader = quad.background.into();
+                            paint.shader = background;
                     
                             pixmap.fill_path(
                                 &path,
@@ -170,11 +177,11 @@ impl Renderer {
                                 mask
                             );
 
-                            if quad.border_width > 0f32 {
-                                paint.shader = quad.border_color.into();
+                            if border_width > 0f32 {
+                                paint.shader = border_color;
 
                                 let mut stroke = Stroke::default();
-                                stroke.width = quad.border_width;
+                                stroke.width = border_width;
 
                                 pixmap.stroke_path(
                                     &path,
@@ -187,18 +194,24 @@ impl Renderer {
 
                             builder = path.clear();
                         }
-                        Primitive::Circle(circle) => {
+                        Primitive::Circle {
+                            pos,
+                            radius,
+                            background,
+                            border_width,
+                            border_color
+                        } => {
                             builder.push_circle(
-                                circle.pos.x,
-                                circle.pos.y,
-                                circle.radius
+                                pos.x,
+                                pos.y,
+                                radius
                             );
 
                             let path = builder.finish().unwrap();
 
                             let mut paint = Paint::default();
                             paint.anti_alias = true;
-                            paint.shader = circle.background.into();
+                            paint.shader = background;
 
                             pixmap.fill_path(
                                 &path,
@@ -208,11 +221,11 @@ impl Renderer {
                                 mask
                             );
 
-                            if circle.border_width > 0f32 {
-                                paint.shader = circle.border_color.into();
+                            if border_width > 0f32 {
+                                paint.shader = border_color;
 
                                 let mut stroke = Stroke::default();
-                                stroke.width = circle.border_width;
+                                stroke.width = border_width;
 
                                 pixmap.stroke_path(
                                     &path,
@@ -391,111 +404,26 @@ fn rounded_rect(
     builder.close();
 }
 
-impl Quad {
-    #[inline]
-    pub fn new(rect: Rect, background: impl Into<Background>) -> Self {
-        Self {
-            rect,
-            background: background.into(),
-            border_radius: BorderRadius::default(),
-            border_width: 0f32,
-            border_color: Background::Color(Color::TRANSPARENT)
-        }
-    }
-
-    #[inline]
-    pub fn rounded(
-        rect: Rect,
-        background: impl Into<Background>,
-        border_radius: impl Into<BorderRadius>
-    ) -> Self {
-        Self {
-            rect,
-            background: background.into(),
-            border_radius: border_radius.into(),
-            border_width: 0f32,
-            border_color: Background::Color(Color::TRANSPARENT)
-        }
-    }
-
-    #[inline]
-    pub fn with_border(
-        mut self,
-        width: f32,
-        color: impl Into<Background>
-    ) -> Self {
-        self.border_width = width;
-        self.border_color = color.into();
-
-        self
-    }
-}
-
-impl Circle {
-    #[inline]
-    pub fn new(
-        pos: impl Into<Point>,
-        radius: f32,
-        background: impl Into<Background>
-    ) -> Self {
-        Self {
-            pos: pos.into(),
-            radius,
-            background: background.into(),
-            border_width: 0f32,
-            border_color: Background::Color(Color::TRANSPARENT)
-        }
-    }
-
-    #[inline]
-    pub fn with_border(
-        mut self,
-        width: f32,
-        color: impl Into<Background>
-    ) -> Self {
-        self.border_width = width;
-        self.border_color = color.into();
-
-        self
-    }
-}
-
-impl From<Color> for Background {
-    #[inline]
-    fn from(value: Color) -> Self {
-        Self::Color(value)
-    }
-}
-
-impl From<LinearGradient> for Background {
-    #[inline]
-    fn from(value: LinearGradient) -> Self {
-        Self::LinearGradient(value)
-    }
-}
-
-impl From<[f32; 4]> for BorderRadius {
-    #[inline]
-    fn from(value: [f32; 4]) -> Self {
-        Self(value)
-    }
-}
-
-impl From<f32> for BorderRadius {
-    #[inline]
-    fn from(value: f32) -> Self {
-        Self([value, value, value, value])
-    }
-}
-
 impl<'a> Into<Shader<'a>> for Background {
     #[inline]
     fn into(self) -> Shader<'a> {
         match self {
-            Background::Color(color) => Shader::SolidColor(color),
-            Background::LinearGradient(gradient) =>
-                Shader::LinearGradient(gradient)
+            Background::Color(color) => Shader::SolidColor(color.into()),
+            Background::LinearGradient(gradient) => gradient.0
         }
+    }
+}
+
+impl Into<tiny_skia::Color> for Color {
+    #[inline]
+    fn into(self) -> tiny_skia::Color {
+        // tiny_skia is ABGR
+        tiny_skia::Color::from_rgba8(
+            self.b,
+            self.g,
+            self.r,
+            self.a
+        )
     }
 }
 

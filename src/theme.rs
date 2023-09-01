@@ -1,5 +1,6 @@
-use tiny_skia::Color;
 use cosmic_text::{Family, Stretch, Style, Weight};
+
+use crate::color::Color;
 
 pub struct Theme {
     pub font: Font,
@@ -35,18 +36,18 @@ impl Theme {
                 ..Font::default()
             },
             font_size: 16f32,
-            base: Color::from_rgba8(250, 244, 237, 255),
-            surface: Color::from_rgba8(255, 250, 243, 255),
-            overlay: Color::from_rgba8(242, 233, 222, 255),
-            muted: Color::from_rgba8(152, 147, 165, 255),
-            subtle: Color::from_rgba8(121, 117, 147, 255),
-            text: Color::from_rgba8(87, 82, 121, 255),
-            warm1: Color::from_rgba8(180, 99, 122, 255),
-            warm2: Color::from_rgba8(234, 157, 52, 255),
-            warm3: Color::from_rgba8(215, 130, 126, 255),
-            cold1: Color::from_rgba8(40, 105, 131, 255),
-            cold2: Color::from_rgba8(86, 148, 159, 255),
-            cold3: Color::from_rgba8(144, 122, 169, 255)
+            base: Color::rgb(250, 244, 237),
+            surface: Color::rgb(255, 250, 243),
+            overlay: Color::rgb(242, 233, 222),
+            muted: Color::rgb(152, 147, 165),
+            subtle: Color::rgb(121, 117, 147),
+            text: Color::rgb(87, 82, 121),
+            warm1: Color::rgb(180, 99, 122),
+            warm2: Color::rgb(234, 157, 52),
+            warm3: Color::rgb(215, 130, 126),
+            cold1: Color::rgb(40, 105, 131),
+            cold2: Color::rgb(86, 148, 159),
+            cold3: Color::rgb(144, 122, 169)
         }
     }
 }

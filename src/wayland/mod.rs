@@ -69,8 +69,7 @@ pub enum MouseButton {
 pub struct BarWindow {
     event_queue: EventQueue<State>,
     state: State,
-    read_events_guard: Option<ReadEventsGuard>,
-    supports_abgr: bool
+    read_events_guard: Option<ReadEventsGuard>
 }
 
 #[derive(Debug)]
@@ -130,7 +129,6 @@ impl BarWindow {
         Self {
             event_queue,
             read_events_guard: None,
-            supports_abgr: shm.formats().contains(&wl_shm::Format::Abgr8888),
             state: State {
                 registry_state: RegistryState::new(&globals),
                 seat_state: SeatState::new(&globals, &qh),
@@ -205,12 +203,7 @@ impl BarWindow {
 
         let stride = width as i32 * 4;
 
-        let format = if self.supports_abgr {
-            wl_shm::Format::Abgr8888
-        } else {
-            wl_shm::Format::Argb8888
-        };
-
+        let format = wl_shm::Format::Argb8888;
         let buffer = self.state.buffer.get_or_insert_with(|| {
             self.state.pool
                 .create_buffer(width as i32, height as i32, stride, format)
@@ -238,20 +231,6 @@ impl BarWindow {
         };
 
         func(canvas, buffer_size);
-
-        if !self.supports_abgr {
-            assert_eq!(canvas.len() % 4, 0);
-
-            for pixel in canvas.chunks_exact_mut(4) {
-                unsafe {
-                    std::ptr::swap_nonoverlapping(
-                        pixel.get_unchecked_mut(0) as *mut u8,
-                        pixel.get_unchecked_mut(2) as *mut u8,
-                        1
-                    );
-                }
-            }
-        }
 
         let surface = self.state.layer_surface.wl_surface();
         surface.damage_buffer(0, 0, width as i32, height as i32);

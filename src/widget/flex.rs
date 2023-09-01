@@ -1,6 +1,6 @@
 use crate::{
     geometry::{Size, Rect},
-    renderer::Quad,
+    draw::Quad,
     ui::{
         InitCtx,DrawCtx, LayoutCtx,
         UpdateCtx, Event, Id
