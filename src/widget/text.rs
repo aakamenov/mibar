@@ -2,27 +2,39 @@ use crate::{
     geometry::Size,
     ui::{InitCtx, DrawCtx, LayoutCtx, UpdateCtx},
     renderer::TextInfo,
-    theme::Font
+    theme::Font,
+    color::Color
 };
 use super::{
     size_constraints::SizeConstraints,
     Element, Widget
 };
 
+pub type StyleFn = fn() -> Style;
+
 pub struct Text {
     text: String,
     text_size: Option<f32>,
-    font: Option<Font>
+    font: Option<Font>,
+    style: Option<StyleFn>
 }
 
 pub struct TextWidget;
 
+#[derive(Debug)]
 pub enum Message {
     SetText(String)
 }
 
+#[derive(Debug)]
 pub struct State {
-    info: TextInfo  
+    info: TextInfo,
+    style: Option<StyleFn>
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Style {
+    pub color: Color
 }
 
 impl Text {
@@ -31,7 +43,8 @@ impl Text {
         Self {
             text: text.into(),
             text_size: None,
-            font: None
+            font: None,
+            style: None
         }
     }
 
@@ -45,6 +58,13 @@ impl Text {
     #[inline]
     pub fn font(mut self, font: Font) -> Self {
         self.font = Some(font);
+
+        self
+    }
+
+    #[inline]
+    pub fn style(mut self, style: StyleFn) -> Self {
+        self.style = Some(style);
 
         self
     }
@@ -66,7 +86,13 @@ impl Element for Text {
             self.font.unwrap_or(theme.font)
         );
 
-        (TextWidget, State { info })
+        (
+            TextWidget,
+            State {
+                info,
+                style: self.style
+            }
+        )
     }
 
     fn message(
@@ -97,6 +123,9 @@ impl Widget for TextWidget {
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.renderer.fill_text(&state.info, ctx.layout(), ctx.theme().text);
+        let style = state.style.unwrap_or(ctx.theme().text);
+        let color = (style)().color;
+        
+        ctx.renderer.fill_text(&state.info, ctx.layout(), color);
     }
 }

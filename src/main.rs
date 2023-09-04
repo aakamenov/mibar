@@ -31,7 +31,7 @@ async fn main() {
 
     // TODO: It'd be more efficient to process multiple results at once.
     let (tx, mut rx) = channel::<TaskResult>(100);
-    let mut ui = Ui::new(tx, bar::build);
+    let mut ui = Ui::new(tx, bar::theme(), bar::build);
 
     // Wait for the initial resize event
     {

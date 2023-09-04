@@ -1,6 +1,8 @@
 mod hyprland;
 mod button;
 
+pub use button::{StyleFn, Style, ButtonStyle};
+
 use std::{any::Any, mem::MaybeUninit};
 
 use hyprland::{WorkspacesChanged, start_listener_loop};
@@ -18,11 +20,20 @@ use crate::{
 const WORKSPACE_COUNT: usize = 8;
 const SPACING: f32 = 4f32;
 
-pub struct Workspaces;
+pub struct Workspaces {
+    style: StyleFn
+}
 pub struct WorkspacesWidget;
 
 pub struct State {
     buttons: [TypedId<button::Button>; WORKSPACE_COUNT]
+}
+
+impl Workspaces {
+    #[inline]
+    pub fn new(style: StyleFn) -> Self {
+        Self { style }
+    }
 }
 
 impl Element for Workspaces {
@@ -41,7 +52,9 @@ impl Element for Workspaces {
             MaybeUninit::uninit();
 
         for i in 0..WORKSPACE_COUNT {
-            let button = ctx.new_child(button::Button::new((i + 1) as u8));
+            let button = ctx.new_child(
+                button::Button::new((i + 1) as u8, self.style)
+            );
             unsafe {
                 buttons.assume_init_mut()[i] = button;
             }

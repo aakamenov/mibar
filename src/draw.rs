@@ -4,7 +4,7 @@ use crate::{
     geometry::{Rect, Point}
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Background {
     Color(Color),
     LinearGradient(LinearGradient)

@@ -16,22 +16,39 @@ use super::hyprland;
 
 const RADIUS: f32 = 10f32;
 const TEXT_SIZE: f32 = 12f32;
-const HOVER_OPACITY: f32 = 0.7;
-const FOCUS_OPACITY: f32 = 0.5;
+
+pub type StyleFn = fn() -> Style;
 
 pub struct Button {
-    id: u8
+    id: u8,
+    style: StyleFn
 }
 
 pub struct ButtonWidget;
 
 pub struct State {
     id: u8,
-    is_focused: bool,
+    is_active: bool,
     is_hovered: bool,
     text_info: TextInfo,
     text_size: Size,
-    status: WorkspaceStatus
+    status: WorkspaceStatus,
+    style: StyleFn
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Style {
+    pub active: ButtonStyle,
+    pub inactive: ButtonStyle,
+    pub text_color: Color,
+    pub selected_text_color: Color 
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ButtonStyle {
+    pub color: Color,
+    pub hovered: Color,
+    pub active: Color
 }
 
 #[derive(Clone, Copy, PartialEq, Default, Debug)]
@@ -42,8 +59,8 @@ pub struct WorkspaceStatus {
 
 impl Button {
     #[inline]
-    pub fn new(id: u8) -> Self {
-        Self { id }
+    pub fn new(id: u8, style: StyleFn) -> Self {
+        Self { id, style }
     }
 }
 
@@ -57,12 +74,13 @@ impl Element for Button {
     ) {
         let state = State {
             id: self.id,
-            is_focused: false,
+            is_active: false,
             is_hovered: false,
             text_info: TextInfo::new("0", TEXT_SIZE)
                 .with_font(ctx.theme().font),
             text_size: Size::ZERO,
-            status: WorkspaceStatus::default()
+            status: WorkspaceStatus::default(),
+            style: self.style
         };
 
         (ButtonWidget, state)
@@ -127,25 +145,25 @@ impl Widget for ButtonWidget {
                     if matches!(button, MouseButton::Left) =>
                 {
                     if ctx.layout().contains(*pos) && !state.status.is_current {
-                        state.is_focused = true;
+                        state.is_active = true;
                         ctx.request_redraw();
                     }
                 }
                 MouseEvent::MouseRelease { pos, button }
                     if matches!(button, MouseButton::Left) =>
                 {
-                    if state.is_focused &&
+                    if state.is_active &&
                         ctx.layout().contains(*pos) &&
                         !state.status.is_current
                     {
                         ctx.task(hyprland::change_workspace(state.id));
                     }
 
-                    if state.is_focused && !state.status.is_current {
+                    if state.is_active && !state.status.is_current {
                         ctx.request_redraw();
                     }
 
-                    state.is_focused = false;
+                    state.is_active = false;
                 }
                 _ => { }
             }
@@ -153,32 +171,23 @@ impl Widget for ButtonWidget {
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
+        let style = (state.style)();
         let layout = ctx.layout();
         let center = layout.center();
         let has_windows = state.status.num_windows > 0;
 
-        let color = if has_windows || state.status.is_current {
-            ctx.theme().warm1
+        let button_style = if has_windows || state.status.is_current {
+            style.active
         } else {
-            ctx.theme().muted
+            style.inactive
         };
 
         let fill = if state.status.is_current {
-            color
-        } else if state.is_focused {
-            let mut color = color.clone();
-            unsafe {
-                color.apply_opacity_unchecked(FOCUS_OPACITY);
-            }
-
-            color
+            button_style.color
+        } else if state.is_active {
+            button_style.active
         } else if state.is_hovered {
-            let mut color = color.clone();
-            unsafe {
-                color.apply_opacity_unchecked(HOVER_OPACITY);
-            }
-
-            color
+            button_style.hovered
         } else {
             Color::TRANSPARENT
         };
@@ -190,7 +199,7 @@ impl Widget for ButtonWidget {
                 fill
             ).with_border(
                 2f32,
-                color
+                button_style.color
             )
         );
 
@@ -202,10 +211,13 @@ impl Widget for ButtonWidget {
             ctx.renderer.fill_text(
                 &state.text_info,
                 rect,
-                if state.status.is_current {
-                    ctx.theme().base
+                if state.status.is_current ||
+                    state.is_hovered ||
+                    state.is_active
+                {
+                    style.selected_text_color
                 } else {
-                    ctx.theme().text
+                    style.text_color
                 }
             );
         }

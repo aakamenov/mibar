@@ -12,10 +12,28 @@ use tokio::time::{Duration, interval};
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 
-pub struct Ram;
+pub struct Ram {
+    style: Option<text::StyleFn>
+}
+
 pub struct RamWidget;
+
 pub struct State {
     text: TypedId<Text>
+}
+
+impl Ram {
+    #[inline]
+    pub fn new() -> Self {
+        Self { style: None }
+    }
+
+    #[inline]
+    pub fn style(mut self, style: text::StyleFn) -> Self {
+        self.style = Some(style);
+
+        self
+    }
 }
 
 #[inline]
@@ -45,8 +63,14 @@ impl Element for Ram {
             }
         });
 
+        let text = format(RamUsage::default());
+        let text = match self.style {
+            Some(style) => Text::new(text).style(style),
+            None => Text::new(text),
+        };
+
         let state = State {
-            text: ctx.new_child(Text::new(format(RamUsage::default())))
+            text: ctx.new_child(text)
         };
 
         (RamWidget, state)

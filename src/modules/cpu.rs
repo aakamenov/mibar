@@ -12,10 +12,28 @@ use tokio::time::{Duration, interval};
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 
-pub struct Cpu;
+pub struct Cpu {
+    style: Option<text::StyleFn>
+}
+
 pub struct CpuWidget;
+
 pub struct State {
     text: TypedId<Text>
+}
+
+impl Cpu {
+    #[inline]
+    pub fn new() -> Self {
+        Self { style: None }
+    }
+
+    #[inline]
+    pub fn style(mut self, style: text::StyleFn) -> Self {
+        self.style = Some(style);
+
+        self
+    }
 }
 
 #[inline]
@@ -42,8 +60,14 @@ impl Element for Cpu {
             }
         });
 
+        let text = format(0f64);
+        let text = match self.style {
+            Some(style) => Text::new(text).style(style),
+            None => Text::new(text),
+        };
+        
         let state = State {
-            text: ctx.new_child(Text::new(format(0f64)))
+            text: ctx.new_child(text)
         };
 
         (CpuWidget, state)

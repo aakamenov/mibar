@@ -1,11 +1,5 @@
-mod workspaces;
-mod date_time;
-mod cpu;
-mod ram;
-mod battery;
-
-pub use workspaces::*;
-pub use date_time::*;
-pub use cpu::*;
-pub use ram::*;
-pub use battery::*;
+pub mod workspaces;
+pub mod date_time;
+pub mod cpu;
+pub mod ram;
+pub mod battery;

@@ -1,7 +1,8 @@
 use crate::{
     geometry::Size,
     ui::{InitCtx, DrawCtx, LayoutCtx},
-    draw::Quad
+    draw::Quad,
+    color::Color
 };
 use super::{
     size_constraints::SizeConstraints,
@@ -32,9 +33,6 @@ impl Widget for MusicWidget {
     }
 
     fn draw(_state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.renderer.fill_quad(
-            Quad::rounded(ctx.layout(), ctx.theme().warm2, 6f32)
-                .with_border(2f32, ctx.theme().warm1)
-        );
+        ctx.renderer.fill_quad(Quad::new(ctx.layout(), Color::RED));
     }
 }

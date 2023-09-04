@@ -103,10 +103,11 @@ struct WidgetState {
 impl Ui {
     pub fn new<E: Element>(
         task_sender: Sender<TaskResult>,
+        theme: Theme,
         build: impl FnOnce() -> E
     ) -> Self {
         let mut ctx = UiCtx {
-            theme: Theme::light(),
+            theme,
             mouse_pos: Point::ZERO,
             widgets: IntMap::default(),
             // We start from 1 because we use 0 just below as a fake ID

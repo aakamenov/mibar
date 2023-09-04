@@ -7,7 +7,7 @@ use crate::{
     ui::{InitCtx, DrawCtx, LayoutCtx, ValueSender},
     renderer::TextInfo,
     color::Color,
-    draw::Quad,
+    draw::{Quad, Background},
     sys_info::battery
 };
 
@@ -21,18 +21,39 @@ const TERMINAL_SIZE: Size = Size::new(4f32, 9f32);
 const BODY_RADIUS: f32 = 2f32;
 const TEXT_SIZE: f32 = 12f32;
 
-pub struct Battery;
+pub type StyleFn = fn(capacity: u8) -> Style;
+
+pub struct Battery {
+    style: StyleFn
+}
+
 pub struct BatteryWidget;
+
 pub struct State {
     info: Option<BatteryInfo>,
     text_info: TextInfo,
-    text_size: Size
+    text_size: Size,
+    style: StyleFn
+}
+
+#[derive(Clone, Debug)]
+pub struct Style {
+    pub body: Color,
+    pub background: Background,
+    pub text: Color
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct BatteryInfo {
     capacity: u8,
     status: battery::Status
+}
+
+impl Battery {
+    #[inline]
+    pub fn new(style: StyleFn) -> Self {
+        Self { style }
+    }
 }
 
 impl Element for Battery {
@@ -84,6 +105,7 @@ impl Element for Battery {
 
         let state = State {
             info: None,
+            style: self.style,
             text_info: TextInfo::new("0", TEXT_SIZE)
                 .with_font(font),
             text_size: Size::ZERO
@@ -137,14 +159,14 @@ impl Widget for BatteryWidget {
             return;
         };
 
-        let body_color = ctx.theme().subtle;
+        let style = (state.style)(info.capacity);
 
         let mut body = ctx.layout();
         body.set_size(BODY_SIZE);
 
         ctx.renderer.fill_quad(
             Quad::rounded(body, Color::TRANSPARENT, BODY_RADIUS)
-                .with_border(2f32, body_color)
+                .with_border(2f32, style.body)
         );
 
         let body_center = body.center();
@@ -156,21 +178,13 @@ impl Widget for BatteryWidget {
         );
 
         ctx.renderer.fill_quad(
-            Quad::rounded(terminal, body_color, BODY_RADIUS)
+            Quad::rounded(terminal, style.body, BODY_RADIUS)
         );
 
         let mut fill = body.shrink(2f32);
         fill.width = (fill.width * info.capacity as f32) / 100f32;
 
-        let fill_color = if info.capacity >= 80 {
-            ctx.theme().warm2
-        } else if info.capacity >= 20 {
-            ctx.theme().cold3
-        } else {
-            ctx.theme().warm1
-        };
-
-        ctx.renderer.fill_quad(Quad::new(fill, fill_color));
+        ctx.renderer.fill_quad(Quad::new(fill, style.background));
 
         let mut text_rect = Rect::from_size(state.text_size);
         text_rect.x = body_center.x - (text_rect.width / 2f32);
@@ -179,7 +193,7 @@ impl Widget for BatteryWidget {
         ctx.renderer.fill_text(
             &state.text_info,
             text_rect,
-            ctx.theme().text
+            style.text
         );
     }
 }

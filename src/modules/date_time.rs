@@ -14,12 +14,28 @@ use crate::{
     }
 };
 
-pub struct DateTime;
+pub struct DateTime {
+    style: Option<text::StyleFn>
+}
 
 pub struct DateTimeWidget;
 
 pub struct State {
     text: TypedId<Text>
+}
+
+impl DateTime {
+    #[inline]
+    pub fn new() -> Self {
+        Self { style: None }
+    }
+
+    #[inline]
+    pub fn style(mut self, style: text::StyleFn) -> Self {
+        self.style = Some(style);
+
+        self
+    }
 }
 
 fn get_time() -> (String, i32) {
@@ -53,8 +69,14 @@ impl Element for DateTime {
     ) {
         
         let (date, remaining) = get_time();
+
+        let text = match self.style {
+            Some(style) => Text::new(date).style(style),
+            None => Text::new(date),
+        };
+        
         let state = State {
-            text: ctx.new_child(Text::new(date))
+            text: ctx.new_child(text)
         };
 
         ctx.task(async move {

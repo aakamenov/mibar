@@ -1,6 +1,8 @@
 use crate::{
     geometry::{Size, Rect},
     draw::Quad,
+    draw::{Background, BorderRadius},
+    color::Color,
     ui::{
         InitCtx,DrawCtx, LayoutCtx,
         UpdateCtx, Event, Id
@@ -11,13 +13,16 @@ use super::{
     Element, Widget
 };
 
+pub type StyleFn = fn() -> Option<Style>;
+ 
 pub struct Flex<F: FnOnce(&mut FlexBuilder)> {
     create: F,
     axis: Axis,
     main_alignment: Alignment,
     cross_alignment: Alignment,
     spacing: f32,
-    padding: f32
+    padding: f32,
+    style: Option<StyleFn>
 }
 
 pub struct FlexBuilder<'a: 'b, 'b> {
@@ -33,7 +38,16 @@ pub struct State {
     main_alignment: Alignment,
     cross_alignment: Alignment,
     spacing: f32,
-    padding: f32
+    padding: f32,
+    style: Option<StyleFn>
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Style {
+    pub background: Background,
+    pub border_radius: BorderRadius,
+    pub border_width: f32,
+    pub border_color: Background
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -89,6 +103,13 @@ impl<F: FnOnce(&mut FlexBuilder)> Flex<F> {
     }
 
     #[inline]
+    pub fn style(mut self, style: StyleFn) -> Self {
+        self.style = Some(style);
+
+        self
+    }
+
+    #[inline]
     fn new(create: F, axis: Axis) -> Self {
         Self {
             create,
@@ -96,7 +117,8 @@ impl<F: FnOnce(&mut FlexBuilder)> Flex<F> {
             main_alignment: Alignment::Start,
             cross_alignment: Alignment::Center,
             spacing: 0f32,
-            padding: 0f32
+            padding: 0f32,
+            style: None
         }
     }
 }
@@ -153,6 +175,7 @@ impl<F: FnOnce(&mut FlexBuilder)> Element for Flex<F> {
             cross_alignment: self.cross_alignment,
             spacing: self.spacing,
             padding: self.padding,
+            style: self.style
         };
         
         (FlexWidget, state)
@@ -276,7 +299,15 @@ impl Widget for FlexWidget {
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.renderer.fill_quad(Quad::new(ctx.layout(), ctx.theme().base));
+        if let Some(style) = state.style.unwrap_or(ctx.theme().flex)() {
+            ctx.renderer.fill_quad(Quad {
+                rect: ctx.layout(),
+                background: style.background,
+                border_radius: style.border_radius,
+                border_width: style.border_width,
+                border_color: style.border_color
+            });
+        }
 
         for (child, _) in &state.children {
             ctx.draw(child);
@@ -343,6 +374,17 @@ impl Alignment {
             Self::Start => { }
             Self::Center => *value += (space - size) / 2f32,
             Self::End => *value += space - size
+        }
+    }
+}
+
+impl Style {
+    pub fn solid_background(background: Color) -> Self {
+        Self {
+            background: background.into(),
+            border_radius: 0f32.into(),
+            border_width: 0f32,
+            border_color: Color::TRANSPARENT.into()
         }
     }
 }
