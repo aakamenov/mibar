@@ -6,7 +6,8 @@ use crate::{
         date_time::DateTime,
         battery::{self, Battery},
         cpu::Cpu,
-        ram::Ram
+        ram::Ram,
+        volume::{pulseaudio, PulseAudioVolume}
     },
     widget::{
         music::Music,
@@ -74,6 +75,7 @@ pub fn build() -> impl Element {
         builder.add_flex(middle, 2f32);
 
         let right = Flex::row(|builder| {
+            builder.add_non_flex(PulseAudioVolume::new(format_audio));
             builder.add_non_flex(Battery::new(battery_style));
             builder.add_non_flex(Cpu::new());
             builder.add_non_flex(Ram::new());
@@ -121,4 +123,20 @@ fn workspaces_style() -> workspaces::Style {
         text_color: TEXT,
         selected_text_color: BASE
     }
+}
+
+fn format_audio(state: pulseaudio::State) -> String {
+    if state.is_muted {
+        return "󰝟".into();
+    }
+
+    let icon = if state.volume >= 80 {
+        "󰕾"
+    } else if state.volume >= 20 {
+        "󰖀"
+    } else {
+        "󰕿"
+    };
+
+    format!("{} {}", icon, state.volume)
 }
