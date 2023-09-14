@@ -71,14 +71,16 @@ impl Widget for WorkspacesWidget {
 
     fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
         if let Event::Mouse(MouseEvent::Scroll(delta)) = event {
-            let y = delta.values().y;
-            if y > 0f32 {
-                ctx.task_void(hyprland::move_workspace_next());
-            } else if y < 0f32 {
-                ctx.task_void(hyprland::move_workspace_prev());
-            }
+            if ctx.layout().contains(ctx.mouse_pos()) {
+                let y = delta.values().y;
+                if y > 0f32 {
+                    ctx.task_void(hyprland::move_workspace_next());
+                } else if y < 0f32 {
+                    ctx.task_void(hyprland::move_workspace_prev());
+                }
 
-            return;
+                return;
+            }
         }
 
         for button in &state.buttons {
