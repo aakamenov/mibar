@@ -37,7 +37,7 @@ use smithay_client_toolkit::{
     delegate_pointer
 };
 
-use crate::geometry::Point;
+use crate::geometry::{Point, Vector};
 
 #[derive(Debug)]
 pub enum WaylandEvent {
@@ -48,6 +48,8 @@ pub enum WaylandEvent {
 
 #[derive(Clone, Copy, Debug)]
 pub enum MouseEvent {
+    EnterWindow,
+    LeaveWindow,
     MousePress {
         pos: Point,
         button: MouseButton
@@ -56,7 +58,8 @@ pub enum MouseEvent {
         pos: Point,
         button: MouseButton
     },
-    MouseMove(Point)
+    MouseMove(Point),
+    Scroll(MouseScrollDelta)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -64,6 +67,26 @@ pub enum MouseButton {
     Left,
     Right,
     Middle
+}
+
+// This type follows the winit implementation.
+
+/// The difference in the mouse scroll wheel or touchpad state represented
+/// in either lines/rows or pixels.
+/// A positive Y value indicates that the content is being moved down.
+/// A positive X value indicates that the content is being moved right.
+#[derive(Clone, Copy, Debug)]
+pub enum MouseScrollDelta {
+    /// Amount in lines or rows to scroll in the horizontal and vertical directions.
+    Line {
+        x: f32,
+        y: f32
+    },
+    /// Amount in pixels to scroll in the horizontal and vertical direction.
+    Pixel {
+        x: f32,
+        y: f32
+    }
 }
 
 pub struct BarWindow {
@@ -477,7 +500,31 @@ impl PointerHandler for State {
                             )
                         );
                     }
-                _ => { }
+                PointerEventKind::Axis { horizontal, vertical, .. } => {
+                    let has_discrete_scroll = horizontal.discrete != 0 || vertical.discrete != 0;
+                    let delta = if has_discrete_scroll {
+                        MouseScrollDelta::Line {
+                            x: horizontal.discrete as f32,
+                            y: vertical.discrete as f32
+                        }
+                    } else {
+                        let scale_factor = self.monitor.viewport.scale_factor;
+                        MouseScrollDelta::Pixel {
+                            x: horizontal.absolute as f32 * scale_factor,
+                            y: vertical.absolute as f32 * scale_factor
+                        }
+                    };
+
+                    self.pending_events.push(
+                        WaylandEvent::Mouse(MouseEvent::Scroll(delta))
+                    )
+                }
+                PointerEventKind::Enter { .. } => self.pending_events.push(
+                    WaylandEvent::Mouse(MouseEvent::EnterWindow)
+                ),
+                PointerEventKind::Leave { .. } => self.pending_events.push(
+                    WaylandEvent::Mouse(MouseEvent::LeaveWindow)
+                )
             }
         }
     }
@@ -508,6 +555,18 @@ impl MouseButton {
             273 => Some(MouseButton::Right),
             274 => Some(MouseButton::Middle),
             _ => None
+        }
+    }
+}
+
+impl MouseScrollDelta {
+    /// Get the delta values, disregarding the units.
+    /// Use this if you only need the direction.
+    #[inline]
+    pub fn values(&self) -> Vector {
+        match self {
+            MouseScrollDelta::Line { x, y } => Vector::new(*x, *y),
+            MouseScrollDelta::Pixel { x, y } => Vector::new(*x, *y)
         }
     }
 }
