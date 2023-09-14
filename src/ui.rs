@@ -465,6 +465,14 @@ impl_context_method! {
     InitCtx<'_>,
     UpdateCtx<'_>,
     {
+        #[inline]
+        pub fn task_void(
+            &self,
+            task: impl Future<Output = ()> + Send + 'static
+        ) {
+            tokio::spawn(task);
+        }
+
         pub fn task<T: Send + 'static>(
             &self,
             task: impl Future<Output = T> + Send + 'static

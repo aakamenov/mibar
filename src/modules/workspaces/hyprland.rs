@@ -114,11 +114,28 @@ pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
     }
 }
 
+#[inline]
 pub async fn change_workspace(id: u8) {
     let cmd = format!("dispatch workspace {id}");
+    dispatch_command(cmd.as_bytes()).await;
+}
+
+#[inline]
+pub async fn move_workspace_next() {
+    let cmd = format!("dispatch workspace e+1");
+    dispatch_command(cmd.as_bytes()).await;
+}
+
+#[inline]
+pub async fn move_workspace_prev() {
+    let cmd = format!("dispatch workspace e-1");
+    dispatch_command(cmd.as_bytes()).await;
+}
+
+async fn dispatch_command(cmd: &[u8]) {
     let mut buf = [0u8; 64];
 
-    let Some(mut write_stream) = dispatch(cmd.as_bytes()).await else {
+    let Some(mut write_stream) = dispatch(cmd).await else {
         return;
     };
 

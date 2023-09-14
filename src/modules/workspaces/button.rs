@@ -120,9 +120,6 @@ impl Widget for ButtonWidget {
         bounds.constrain(size)
     }
 
-    // Task returns no value.
-    fn task_result(_state: &mut Self::State, _ctx: &mut UpdateCtx, _data: Box<dyn Any>) { }
-
     fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
         match event {
             Event::Mouse(event) => match event {
@@ -156,7 +153,7 @@ impl Widget for ButtonWidget {
                         ctx.layout().contains(*pos) &&
                         !state.status.is_current
                     {
-                        ctx.task(hyprland::change_workspace(state.id));
+                        ctx.task_void(hyprland::change_workspace(state.id));
                     }
 
                     if state.is_active && !state.status.is_current {
