@@ -252,20 +252,37 @@ impl Ui {
 
 impl UiCtx {
     fn dealloc(&mut self, id: Id) {
-        self.widgets.remove(&id.0);
+        let widget = self.widgets.remove(&id.0).unwrap();
+        widget.widget.destroy(widget.state);
 
         let parent = self.child_to_parent.remove(&id.0).unwrap();
-        let children = self.parent_to_children.entry(parent).or_default();
+        let children = self.parent_to_children.get_mut(&parent).unwrap();
         let index = children.iter().position(|x| *x == id.0).unwrap();
+
         // Can't use swap_remove() because order is important
         children.remove(index);
 
         let children = self.parent_to_children
             .remove(&id.0)
-            .unwrap_or(Vec::new());
+            .unwrap_or_default();
 
         for child in children {
-            self.dealloc(Id(child));
+            self.dealloc_impl(child);
+        }
+    }
+
+    fn dealloc_impl(&mut self, id: WidgetId) {
+        let widget = self.widgets.remove(&id).unwrap();
+        widget.widget.destroy(widget.state);
+
+        self.child_to_parent.remove(&id).unwrap();
+
+        let children = self.parent_to_children
+            .remove(&id)
+            .unwrap_or_default();
+
+        for child in children {
+            self.dealloc_impl(child);
         }
     }
 
