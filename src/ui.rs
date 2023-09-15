@@ -9,7 +9,10 @@ use std::{
 
 use tiny_skia::PixmapMut;
 use nohash::IntMap;
-use tokio::sync::mpsc::Sender;
+use tokio::{
+    sync::mpsc::Sender,
+    task::JoinHandle
+};
 
 use crate::{
     geometry::{Rect, Size, Point},
@@ -389,8 +392,9 @@ impl<'a> UpdateCtx<'a> {
         ctx.new_child(el)
     }
 
+    /// Destroys the given widget and all its children **immediately**.
     #[inline]
-    pub fn dealloc_child(&mut self, id: impl Into<Id>) {
+    pub fn destroy_child(&mut self, id: impl Into<Id>) {
         self.request_layout();
         self.ui.dealloc(id.into());
     }
@@ -483,17 +487,30 @@ impl_context_method! {
     UpdateCtx<'_>,
     {
         #[inline]
+        #[doc = r"A fire and forget type task that does not produce any result.
+This will NOT call [`Widget::task_result`] when complete."]
+        #[must_use = r"It is your responsibility to abort long running or infinite loop
+tasks if you don't need them anymore using the handle returned by this method.
+You can ignore the return value otherwise."]
         pub fn task_void(
             &self,
             task: impl Future<Output = ()> + Send + 'static
-        ) {
-            tokio::spawn(task);
+        ) -> JoinHandle<()> {
+            tokio::spawn(task)
         }
 
+        #[doc = r"A task that produces a single value and when complete calls
+[`Widget::task_result`] on the widget that initiated this method with the
+value produced by the async computation. You MUST implement
+[`Widget::task_result`] if you are using this method in your widget. If you
+don't, the default implementation is a panic which will remind you of that."]
+#[must_use = r"It is your responsibility to abort long running or infinite loop
+tasks if you don't need them anymore using the handle returned by this method.
+You can ignore the return value otherwise."]
         pub fn task<T: Send + 'static>(
             &self,
             task: impl Future<Output = T> + Send + 'static
-        ) {
+        ) -> JoinHandle<()> {
             let tx = self.ui.task_sender.clone();
             let id = self.current;
     
@@ -504,19 +521,29 @@ impl_context_method! {
                     id,
                     data: Box::new(result)
                 }).await.unwrap();
-            });
+            })
         }
     
+        #[doc = r"A task that can produce multiple values. For each value produced
+[`Widget::task_result`] is called on the widget that initiated this method
+with the value sent by the `ValueSender`. You MUST implement
+[`Widget::task_result`] if you are using this method in your widget. If you
+don't, the default implementation is a panic which will remind you of that."]
+#[must_use = r"It is your responsibility to abort long running or infinite loop
+tasks if you don't need them anymore using the handle returned by this method.
+You can ignore the return value otherwise."]
         pub fn task_with_sender<T: Send + 'static, Fut>(
             &self,
             create_future: impl FnOnce(ValueSender<T>) -> Fut
-        ) where Fut: Future<Output = ()> + Send + 'static {
+        ) -> JoinHandle<()>
+            where Fut: Future<Output = ()> + Send + 'static
+        {
             let sender = ValueSender::new(
                 self.current,
                 self.ui.task_sender.clone()
             );
     
-            tokio::spawn(create_future(sender));
+            tokio::spawn(create_future(sender))
         }
     }
 }

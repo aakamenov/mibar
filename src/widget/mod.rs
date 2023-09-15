@@ -42,6 +42,7 @@ pub trait Widget {
             type_name::<Self>()
         );
     }
+    fn destroy(_state: Self::State) { }
 }
 
 pub trait AnyWidget {
@@ -71,6 +72,8 @@ pub trait AnyWidget {
         _ctx: &mut UpdateCtx,
         _data: Box<dyn Any>
     );
+
+    fn destroy(&self, state: Box<dyn Any + 'static>);
 }
 
 // You may wonder why Box<dyn Any + 'static> is used instead of Box<dyn Any> or just
@@ -121,5 +124,9 @@ impl<T: Widget> AnyWidget for T {
         data: Box<dyn Any>
     ) {
         <T as Widget>::task_result(state.downcast_mut().unwrap(), ctx, data)
+    }
+
+    fn destroy(&self, state: Box<dyn Any + 'static>) {
+        <T as Widget>::destroy(*state.downcast().unwrap());
     }
 }
