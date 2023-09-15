@@ -45,7 +45,7 @@ impl Element for Workspaces {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        ctx.task_with_sender(|sender: ValueSender<WorkspacesChanged>| {
+        let _ = ctx.task_with_sender(|sender: ValueSender<WorkspacesChanged>| {
             start_listener_loop(sender)
         });
 
@@ -74,9 +74,9 @@ impl Widget for WorkspacesWidget {
             if ctx.layout().contains(ctx.mouse_pos()) {
                 let y = delta.values().y;
                 if y > 0f32 {
-                    ctx.task_void(hyprland::move_workspace_next());
+                    let _ = ctx.task_void(hyprland::move_workspace_next());
                 } else if y < 0f32 {
-                    ctx.task_void(hyprland::move_workspace_prev());
+                    let _ = ctx.task_void(hyprland::move_workspace_prev());
                 }
 
                 return;

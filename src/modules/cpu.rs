@@ -8,7 +8,10 @@ use crate::{
     sys_info
 };
 
-use tokio::time::{Duration, interval};
+use tokio::{
+    time::{Duration, interval},
+    task::JoinHandle
+};
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 
@@ -19,7 +22,8 @@ pub struct Cpu {
 pub struct CpuWidget;
 
 pub struct State {
-    text: TypedId<Text>
+    text: TypedId<Text>,
+    handle: JoinHandle<()>
 }
 
 impl Cpu {
@@ -49,7 +53,7 @@ impl Element for Cpu {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        ctx.task_with_sender(|sender: ValueSender<f64>| {
+        let handle = ctx.task_with_sender(|sender: ValueSender<f64>| {
             async move {
                 let mut interval = interval(UPDATE_INTERVAL);
 
@@ -67,7 +71,8 @@ impl Element for Cpu {
         };
         
         let state = State {
-            text: ctx.new_child(text)
+            text: ctx.new_child(text),
+            handle
         };
 
         (CpuWidget, state)
@@ -94,5 +99,9 @@ impl Widget for CpuWidget {
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
         ctx.draw(&state.text);
+    }
+
+    fn destroy(state: Self::State) {
+        state.handle.abort();
     }
 }

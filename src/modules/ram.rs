@@ -8,7 +8,10 @@ use crate::{
     sys_info::{self, RamUsage}
 };
 
-use tokio::time::{Duration, interval};
+use tokio::{
+    time::{Duration, interval},
+    task::JoinHandle
+};
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 
@@ -19,7 +22,8 @@ pub struct Ram {
 pub struct RamWidget;
 
 pub struct State {
-    text: TypedId<Text>
+    text: TypedId<Text>,
+    handle: JoinHandle<()>
 }
 
 impl Ram {
@@ -52,7 +56,7 @@ impl Element for Ram {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        ctx.task_with_sender(|sender: ValueSender<RamUsage>| {
+        let handle = ctx.task_with_sender(|sender: ValueSender<RamUsage>| {
             async move {
                 let mut interval = interval(UPDATE_INTERVAL);
 
@@ -70,7 +74,8 @@ impl Element for Ram {
         };
 
         let state = State {
-            text: ctx.new_child(text)
+            text: ctx.new_child(text),
+            handle
         };
 
         (RamWidget, state)
@@ -97,5 +102,9 @@ impl Widget for RamWidget {
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
         ctx.draw(&state.text);
+    }
+
+    fn destroy(state: Self::State) {
+        state.handle.abort();
     }
 }

@@ -11,7 +11,10 @@ use crate::{
     sys_info::battery
 };
 
-use tokio::time::{Duration, interval};
+use tokio::{
+    time::{Duration, interval},
+    task::JoinHandle
+};
 
 const UPDATE_INTERVAL: Duration = Duration::from_secs(30);
 const DEVICE: &str = "BAT0";
@@ -33,7 +36,8 @@ pub struct State {
     info: Option<BatteryInfo>,
     text_info: TextInfo,
     text_size: Size,
-    style: StyleFn
+    style: StyleFn,
+    handle: JoinHandle<()>
 }
 
 #[derive(Clone, Debug)]
@@ -64,7 +68,7 @@ impl Element for Battery {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        ctx.task_with_sender(|sender: ValueSender<Option<BatteryInfo>>| {
+        let handle = ctx.task_with_sender(|sender: ValueSender<Option<BatteryInfo>>| {
             async move {
                 let mut interval = interval(UPDATE_INTERVAL);
 
@@ -108,7 +112,8 @@ impl Element for Battery {
             style: self.style,
             text_info: TextInfo::new("0", TEXT_SIZE)
                 .with_font(font),
-            text_size: Size::ZERO
+            text_size: Size::ZERO,
+            handle
         };
 
         (BatteryWidget, state)
@@ -195,5 +200,9 @@ impl Widget for BatteryWidget {
             text_rect,
             style.text
         );
+    }
+
+    fn destroy(state: Self::State) {
+        state.handle.abort();
     }
 }

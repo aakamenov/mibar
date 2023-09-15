@@ -1,5 +1,3 @@
-use std::any::Any;
-
 use crate::{
     wayland::{MouseEvent, MouseButton},
     geometry::{Size, Rect},
@@ -12,6 +10,7 @@ use crate::{
     renderer::TextInfo,
     color::Color
 };
+
 use super::hyprland;
 
 const RADIUS: f32 = 10f32;
@@ -153,7 +152,7 @@ impl Widget for ButtonWidget {
                         ctx.layout().contains(*pos) &&
                         !state.status.is_current
                     {
-                        ctx.task_void(hyprland::change_workspace(state.id));
+                        let _ = ctx.task_void(hyprland::change_workspace(state.id));
                     }
 
                     if state.is_active && !state.status.is_current {

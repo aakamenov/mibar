@@ -1,6 +1,9 @@
 pub mod pulseaudio;
 
-use tokio::time::{Duration, sleep};
+use tokio::{
+    time::{Duration, sleep},
+    task::JoinHandle
+};
 
 use crate::{
     geometry::Size,
@@ -23,7 +26,8 @@ pub struct PulseAudioVolumeWidget;
 
 pub struct State {
     format: FormatFn,
-    text: TypedId<Text>
+    text: TypedId<Text>,
+    handle: JoinHandle<()>
 }
 
 impl PulseAudioVolume {
@@ -51,7 +55,7 @@ impl Element for PulseAudioVolume {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        ctx.task_with_sender(|sender: ValueSender<pulseaudio::State>| {
+        let handle = ctx.task_with_sender(|sender: ValueSender<pulseaudio::State>| {
             async move {
                 pulseaudio::init();
                 let mut rx = pulseaudio::subscribe();
@@ -89,7 +93,8 @@ impl Element for PulseAudioVolume {
 
         let state = State {
             format: self.format,
-            text: ctx.new_child(text)
+            text: ctx.new_child(text),
+            handle
         };
 
         (PulseAudioVolumeWidget, state)
@@ -120,5 +125,10 @@ impl Widget for PulseAudioVolumeWidget {
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
         ctx.draw(&state.text);
+    }
+
+    fn destroy(state: Self::State) {
+        // TODO: read num subscribers and terminate pulseaudio client if 0
+        state.handle.abort();
     }
 }

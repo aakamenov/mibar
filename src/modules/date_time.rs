@@ -79,7 +79,7 @@ impl Element for DateTime {
             text: ctx.new_child(text)
         };
 
-        ctx.task(async move {
+        let _ = ctx.task(async move {
             sleep(Duration::from_secs(remaining as u64)).await;
             get_time()
         });
@@ -99,7 +99,7 @@ impl Widget for DateTimeWidget {
         let result = data.downcast::<(String, i32)>().unwrap();
 
         let remaining = result.1;
-        ctx.task(async move {
+        let _ = ctx.task(async move {
             sleep(Duration::from_secs(remaining as u64)).await;
             get_time()
         });
