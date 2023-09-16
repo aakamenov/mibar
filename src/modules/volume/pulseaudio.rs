@@ -1,6 +1,6 @@
 use std::{
     fmt,
-    thread::{self, JoinHandle},
+    thread,
     rc::Rc,
     cell::RefCell,
     sync::{RwLock, atomic::{AtomicU8, Ordering}, mpsc},
@@ -13,7 +13,7 @@ use pulse::{
     volume::Volume,
     context::{
         self, Context,
-        introspect::{Introspector, SinkInfo},
+        introspect::SinkInfo,
         subscribe::{self, InterestMaskSet, Facility}
     },
     mainloop::{
@@ -25,7 +25,6 @@ use pulse::{
 };
 
 type ContextRc = Rc<RefCell<Context>>;
-type LoopRc = Rc<RefCell<ThreadedLoop>>;
 
 const DEFAULT_SINK: &str = "@DEFAULT_SINK@";
 
@@ -50,8 +49,7 @@ static DEFAULT_SINK_IDX: RwLock<Option<u32>> = RwLock::new(None);
 //                         IMPORTANT!!!
 //
 // The values below must only be utilized inside the callbacks
-// (which are all executed within a single thread) or inside the
-// init() function, using only simple assignments and reads.
+// (which are all executed within a single thread).
 
 /// We use this in the callback when querying the default sink
 /// since PulseAudio calls it multiple times with different
@@ -59,12 +57,11 @@ static DEFAULT_SINK_IDX: RwLock<Option<u32>> = RwLock::new(None);
 /// and this is set to false that means that there is no default sink
 /// and we set DEFAULT_SINK_IDX to None.
 static mut HAS_DEFAULT_SINK: bool = false;
-
-static mut DISPATCH_THREAD_HANDLE: Option<JoinHandle<()>> = None;
 // -------------------------------------------------------------------
 
 pub enum Request {
-    ToggleMute
+    ToggleMute,
+    Terminate
 }
 
 #[derive(Clone, Copy, PartialEq, Default, Debug)]
@@ -78,6 +75,15 @@ pub fn subscribe() -> Option<watch::Receiver<State>> {
     let lock = RECEIVER.read().unwrap();
 
     lock.deref().clone()
+}
+
+pub fn subscriber_count() -> usize {
+    let lock = SENDER.read().unwrap();
+    if let Some(tx) = lock.deref() {
+        tx.receiver_count() - 1
+    } else {
+        0
+    }
 }
 
 #[inline]
@@ -94,15 +100,6 @@ pub fn dispatch(request: Request) -> bool {
 }
 
 pub fn init() {
-    #[inline]
-    fn error_and_cleanup(ctx: Option<&mut Context>, args: fmt::Arguments) {
-        use std::io::{Write, stderr};
-        stderr().write_fmt(args).expect("Write stderr");
-
-        cleanup(ctx);
-        CLIENT_STATE.store(UNINITIALIZED, Ordering::Release);
-    }
-
     if let Err(_) = CLIENT_STATE.compare_exchange(
         UNINITIALIZED,
         INITIALIZING,
@@ -118,104 +115,93 @@ pub fn init() {
     *SENDER.try_write().unwrap() = Some(tx);
     *RECEIVER.try_write().unwrap() = Some(rx);
 
-    let mut proplist = Proplist::new().unwrap();
-    if let Err(()) = proplist.set_str(properties::APPLICATION_NAME, "mibar") {
-        eprintln!("Error setting the PulseAudio application.name property.");
-    }
-
-    let Some(main_loop) = ThreadedLoop::new() else {
-        error_and_cleanup(
-            None,
-            format_args!("Failed to create a PulseAudio event loop.")
-        );
-
-        return;
-    };
-
-    let main_loop = Rc::new(RefCell::new(main_loop));
-
-    let Some(ctx) = Context::new_with_proplist(
-        main_loop.borrow().deref(),
-        "MibarAppContext",
-        &proplist
-    ) else {
-        error_and_cleanup(
-            None,
-            format_args!("Failed to create PulseAudio context.")
-        );
-
-        return;
-    };
-
-    let introspector = ctx.introspect();
-    let ctx = Rc::new(RefCell::new(ctx));
-    state_callback(&ctx, Rc::clone(&main_loop));
-    subscribe_callback(&ctx);
-
-    if let Err(err) = ctx.borrow_mut().connect(
-        None,
-        context::FlagSet::NOFLAGS,
-        None
-    ) {
-        error_and_cleanup(
-            Some(&mut ctx.borrow_mut()),
-            format_args!(
-                "Error connecting to the PulseAudio server: {}",
-                err.to_string().unwrap_or_default()
-            )
-        );
-
-        return;
-    }
-
-    main_loop.borrow_mut().lock();
-    if let Err(err) = main_loop.borrow_mut().start() {
-        error_and_cleanup(
-            Some(&mut ctx.borrow_mut()),
-            format_args!(
-                "Error starting the PulseAudio loop: {}",
-                err.to_string().unwrap_or_default()
-            )
-        );
-
-        return;
-    };
-
-    // We start the dispatcher thread here for the same reason as
-    // with the globals above - to allow requests to be immediately
-    // buffered after this call. However, it is important to do
-    // so before the unlock() call below in order to ensure that
-    // the state callback is only called AFTER we have assigned
-    // to DISPATCH_THREAD_HANDLE.
-    unsafe {
-        DISPATCH_THREAD_HANDLE = Some(start_dispatcher_thread(
-            introspector
-        ));
-    }
-
-    main_loop.borrow_mut().unlock();
+    start_dispatcher_thread();
 }
 
-fn start_dispatcher_thread(mut introspector: Introspector) -> JoinHandle<()> {
+fn start_dispatcher_thread() {
     let (tx, rx) = mpsc::channel();
 
-    // This sender is later synchronously released in state_callback()
-    // together with the other globals before marking the client state
-    // as uninitialized. Otherwise, it's possible to try initing the client
-    // again and we may face the ABA problem.
+    // This sender is later synchronously released in state_callback(),
+    // causing the  thread that we spawn below to exit.
     *REQUEST_DISPATCHER.try_write().unwrap() = Some(tx);
 
-    // The introspector object internally decrements the context ref count
-    // when it's dropped which will happen when the client is terminating in
-    // state_callback() as REQUEST_DISPATCHER gets set to None and the while
-    // loop below terminates.
     thread::spawn(move || {
+        #[inline]
+        fn error_and_cleanup(args: fmt::Arguments) {
+            use std::io::{Write, stderr};
+            stderr().write_fmt(args).expect("Write stderr");
+
+            cleanup();
+            CLIENT_STATE.store(UNINITIALIZED, Ordering::Release);
+        }
+
+        let mut proplist = Proplist::new().unwrap();
+        if let Err(()) = proplist.set_str(properties::APPLICATION_NAME, "mibar") {
+            eprintln!("Error setting the PulseAudio application.name property.");
+        }
+
+        let Some(mut main_loop) = ThreadedLoop::new() else {
+            error_and_cleanup(
+                format_args!("Failed to create a PulseAudio event loop.")
+            );
+
+            return;
+        };
+
+        let Some(ctx) = Context::new_with_proplist(
+            &main_loop,
+            "MibarAppContext",
+            &proplist
+        ) else {
+            error_and_cleanup(
+                format_args!("Failed to create PulseAudio context.")
+            );
+
+            return;
+        };
+
+        let ctx = Rc::new(RefCell::new(ctx));
+        state_callback(&ctx);
+        subscribe_callback(&ctx);
+
+        if let Err(err) = ctx.borrow_mut().connect(
+            None,
+            context::FlagSet::NOFLAGS,
+            None
+        ) {
+            error_and_cleanup(
+                format_args!(
+                    "Error connecting to the PulseAudio server: {}",
+                    err.to_string().unwrap_or_default()
+                )
+            );
+
+            return;
+        }
+
+        main_loop.lock();
+        if let Err(err) = main_loop.start() {
+            error_and_cleanup(
+                format_args!(
+                    "Error starting the PulseAudio loop: {}",
+                    err.to_string().unwrap_or_default()
+                )
+            );
+
+            return;
+        };
+        main_loop.unlock();
+
+        let mut introspector = ctx.borrow().introspect();
+
+        // When the client is quitting, REQUEST_DISPATCHER gets dropped in
+        // state_callback(), causing this loop to break out.
         while let Ok(request) = rx.recv() {
             let lock = RECEIVER.read().unwrap();
             let Some(state) = lock.as_ref()
                 .and_then(|x| Some(x.borrow().clone())) else
             {
-                break;
+                continue;
             };
 
             drop(lock);
@@ -225,22 +211,36 @@ fn start_dispatcher_thread(mut introspector: Introspector) -> JoinHandle<()> {
             };
 
             match request {
-                Request::ToggleMute => introspector.set_sink_mute_by_index(
-                    index,
-                    !state.is_muted,
-                    None
-                )
+                Request::ToggleMute => {
+                    introspector.set_sink_mute_by_index(
+                        index,
+                        !state.is_muted,
+                        None
+                    );
+                }
+                Request::Terminate => {
+                    if let Some(client_index) = ctx.borrow().get_index() {
+                        introspector.kill_client(
+                            client_index,
+                            |_| ()
+                        );
+                    }
+                }
             };
         }
-    })
+
+        main_loop.quit(Retval(0));
+
+        cleanup();
+        CLIENT_STATE.store(UNINITIALIZED, Ordering::Release);
+    });
 }
 
-fn state_callback(ctx_ref: &ContextRc, main_loop: LoopRc) {
+fn state_callback(ctx_ref: &ContextRc) {
     let ctx = Rc::clone(ctx_ref);
-
     ctx_ref.borrow_mut().set_state_callback(Some(Box::new(move || {
         let state = unsafe { (*ctx.as_ptr()).get_state() };
-        let retval = match state {
+        let quit = match state {
             context::State::Ready => {
                 CLIENT_STATE.store(INITIALIZED, Ordering::Release);
 
@@ -263,34 +263,23 @@ fn state_callback(ctx_ref: &ContextRc, main_loop: LoopRc) {
                     |_| ()
                 );
 
-                None
+                false
             }
-            context::State::Failed => Some(Retval(1)),
-            context::State::Terminated => Some(Retval(0)),
-            _ => None
+            context::State::Failed => true,
+            context::State::Terminated => true,
+            _ => false
         };
 
-        if let Some(retval) = retval {
-            main_loop.borrow_mut().quit(retval);
-            cleanup(Some(&mut ctx.borrow_mut()));
-
-            // Now that we've dropped REQUEST_DISPATCHER in cleanup(),
-            // the dispatcher thread should exit and we safely wait for
-            // it to do so.
-            if let Some(handle) = unsafe { DISPATCH_THREAD_HANDLE.take() } {
-                if let Err(_) = handle.join() {
-                    eprintln!("PulseAudio client dispatcher thread panicked.");
-                }
-            }
-
-            CLIENT_STATE.store(UNINITIALIZED, Ordering::Release);
+        if quit {
+            // Now that we drop REQUEST_DISPATCHER, the dispatcher thread
+            // should safely exit and reset the global state.
+            *REQUEST_DISPATCHER.write().unwrap() = None;
         }
     })));
 }
 
 fn subscribe_callback(ctx_ref: &ContextRc) {
     let ctx = Rc::clone(ctx_ref);
-    
     ctx_ref.borrow_mut().set_subscribe_callback(
         Some(Box::new(move |facility, op, index| {
             let (Some(facility), Some(op)) = (facility, op) else {
@@ -371,13 +360,9 @@ fn default_sink_info_callback(result: ListResult<&SinkInfo>) {
     }
 }
 
-fn cleanup(ctx: Option<&mut Context>) {
-    if let Some(ctx) = ctx {
-        ctx.set_subscribe_callback(None);
-        ctx.set_state_callback(None);
-    }
-
+fn cleanup() {
+    *REQUEST_DISPATCHER.write().unwrap() = None;
     *SENDER.write().unwrap() = None;
     *RECEIVER.write().unwrap() = None;
-    *REQUEST_DISPATCHER.write().unwrap() = None;
+    *DEFAULT_SINK_IDX.write().unwrap() = None;
 }
