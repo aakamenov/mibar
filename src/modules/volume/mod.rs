@@ -1,5 +1,7 @@
 pub mod pulseaudio;
 
+use std::any::Any;
+
 use tokio::{
     time::{Duration, sleep},
     task::JoinHandle
@@ -12,7 +14,11 @@ use crate::{
         text::{self, Text},
         Element, Widget
     },
-    ui::{InitCtx, DrawCtx, LayoutCtx, TypedId, ValueSender}
+    wayland::{MouseEvent, MouseButton},
+    ui::{
+        InitCtx, UpdateCtx, DrawCtx, LayoutCtx,
+        Event, TypedId, ValueSender
+    }
 };
 
 pub type FormatFn = fn(pulseaudio::State) -> String;
@@ -112,10 +118,22 @@ impl Widget for PulseAudioVolumeWidget {
         ctx.layout(&state.text, bounds)
     }
 
+    fn event(
+        _state: &mut Self::State,
+        ctx: &mut UpdateCtx,
+        event: &Event
+    ) {
+        if matches!(event, Event::Mouse(MouseEvent::MousePress { pos, button })
+            if *button == MouseButton::Left && ctx.layout().contains(*pos)
+        ) {
+            pulseaudio::dispatch(pulseaudio::Request::ToggleMute);
+        }
+    }
+
     fn task_result(
         state: &mut Self::State,
-        ctx: &mut crate::ui::UpdateCtx,
-        data: Box<dyn std::any::Any>
+        ctx: &mut UpdateCtx,
+        data: Box<dyn Any>
     ) {
         let pa_state = *data.downcast::<pulseaudio::State>().unwrap();
         let text = (state.format)(pa_state);
@@ -128,7 +146,10 @@ impl Widget for PulseAudioVolumeWidget {
     }
 
     fn destroy(state: Self::State) {
-        // TODO: read num subscribers and terminate pulseaudio client if 0
+        if pulseaudio::subscriber_count() <= 1 {
+            pulseaudio::dispatch(pulseaudio::Request::Terminate);
+        }
+        
         state.handle.abort();
     }
 }

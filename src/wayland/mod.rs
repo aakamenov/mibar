@@ -62,7 +62,7 @@ pub enum MouseEvent {
     Scroll(MouseScrollDelta)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MouseButton {
     Left,
     Right,

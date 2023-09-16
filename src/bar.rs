@@ -127,7 +127,7 @@ fn workspaces_style() -> workspaces::Style {
 
 fn format_audio(state: pulseaudio::State) -> String {
     if state.is_muted {
-        return "󰝟".into();
+        return "󰝟 ".into();
     }
 
     let icon = if state.volume >= 80 {
