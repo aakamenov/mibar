@@ -110,16 +110,8 @@ fn battery_style(capacity: u8) -> battery::Style {
 
 fn workspaces_style() -> workspaces::Style {
     workspaces::Style {
-        active: workspaces::ButtonStyle {
-            color: LOVE,
-            hovered: LOVE_HOVER,
-            active: LOVE_ACTIVE
-        },
-        inactive: workspaces::ButtonStyle {
-            color: MUTED,
-            hovered: MUTED_HOVER,
-            active: MUTED_ACTIVE
-        },
+        active: LOVE,
+        empty: MUTED,
         text_color: TEXT,
         selected_text_color: BASE
     }

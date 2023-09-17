@@ -37,8 +37,8 @@ pub struct State {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Style {
-    pub active: ButtonStyle,
-    pub inactive: ButtonStyle,
+    pub active: Color,
+    pub empty: Color,
     pub text_color: Color,
     pub selected_text_color: Color 
 }
@@ -173,34 +173,44 @@ impl Widget for ButtonWidget {
         let center = layout.center();
         let has_windows = state.status.num_windows > 0;
 
-        let button_style = if has_windows || state.status.is_current {
-            style.active
+        let (fill_color, border_color) = if state.status.is_current {
+            (style.active, style.active)
+        }  else if has_windows {
+            let fill = if state.is_active {
+                style.active
+            } else {
+                Color::TRANSPARENT
+            };
+
+            (fill, style.active)
         } else {
-            style.inactive
+            if state.is_active {
+                (style.active, style.active)
+            } else if state.is_hovered {
+                (Color::TRANSPARENT, style.active)
+            } else {
+                (Color::TRANSPARENT, style.empty)
+            }
         };
 
-        let fill = if state.status.is_current {
-            button_style.color
-        } else if state.is_active {
-            button_style.active
-        } else if state.is_hovered {
-            button_style.hovered
+        let radius = if state.is_active {
+            layout.width / 4f32
         } else {
-            Color::TRANSPARENT
+            layout.width / 2f32
         };
 
         ctx.renderer.fill_circle(
             Circle::new(
                 center,
-                layout.width / 2f32,
-                fill
+                radius,
+                fill_color
             ).with_border(
                 2f32,
-                button_style.color
+                border_color
             )
         );
 
-        if has_windows || state.status.is_current {
+        if (has_windows || state.status.is_current) && !state.is_active {
             let mut rect = Rect::from_size(state.text_size);
             rect.x = center.x - (rect.width / 2f32);
             rect.y = center.y - (rect.height / 2f32);
@@ -208,11 +218,10 @@ impl Widget for ButtonWidget {
             ctx.renderer.fill_text(
                 &state.text_info,
                 rect,
-                if state.status.is_current ||
-                    state.is_hovered ||
-                    state.is_active
-                {
+                if state.status.is_current {
                     style.selected_text_color
+                } else if state.is_hovered {
+                    style.active
                 } else {
                     style.text_color
                 }

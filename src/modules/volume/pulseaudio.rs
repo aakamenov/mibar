@@ -77,6 +77,7 @@ pub fn subscribe() -> Option<watch::Receiver<State>> {
     lock.deref().clone()
 }
 
+#[inline]
 pub fn subscriber_count() -> usize {
     let lock = SENDER.read().unwrap();
     if let Some(tx) = lock.deref() {
