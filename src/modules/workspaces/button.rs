@@ -131,6 +131,7 @@ impl Widget for ButtonWidget {
                         state.is_hovered = true;
                     } else if state.is_hovered {
                         state.is_hovered = false;
+                        state.is_active = false;
 
                         if !state.status.is_current {
                             ctx.request_redraw();
