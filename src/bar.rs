@@ -19,31 +19,23 @@ use crate::{
     color::Color
 };
 
+// Color palette: https://coolors.co/232f2e-293635-aca695-d9ddde-ff8000-70d900-ff4c57-00dbd7-ff64a2
+
 const PADDING: f32 = 6f32;
 const SPACING: f32 = 10f32;
 
-const BASE: Color = Color::rgb(250, 244, 237);
-//const SURFACE: Color = Color::rgb(255, 250, 243);
-//const OVERLAY: Color = Color::rgb(242, 233, 222);
-const MUTED: Color = Color::rgb(152, 147, 165);
-const SUBTLE: Color = Color::rgb(121, 117, 147);
-const TEXT: Color = Color::rgb(87, 82, 121);
-const LOVE: Color = Color::rgb(180, 99, 122);
-const GOLD: Color = Color::rgb(234, 157, 52);
-//const ROSE: Color = Color::rgb(215, 130, 126);
-//const PINE: Color = Color::rgb(40, 105, 131);
-//const FOAM: Color = Color::rgb(86, 148, 159);
-const IRIS: Color = Color::rgb(144, 122, 169);
-//const HIGHLIGHT_LOW: Color = Color::rgb(244, 237, 232);
-//const HIGHLIGHT_MEDIUM: Color = Color::rgb(223, 218, 217);
-//const HIGHLIGHT_HIGH: Color = Color::rgb(206, 202, 205);
+const PRIMARY_RED: Color = Color::rgb(255, 76, 87);
+const PRIMARY_GREEN: Color = Color::rgb(112, 217, 0);
+//const PRIMARY_BLUE: Color = Color::rgb(0, 219, 215);
+const PRIMARY_ORANGE: Color = Color::rgb(255, 128, 0);
+//const PRIMARY_PINK: Color = Color::rgb(255, 100, 162);
 
-const LOVE_HOVER: Color = Color::rgb(186, 111, 132);
-const LOVE_ACTIVE: Color = Color::rgb(191, 122, 142);
+//const BASE: Color = Color::rgb(35, 47, 46);
+const BACKGROUND: Color = Color::rgb(41, 54, 53);
+const TEXT: Color = Color::rgb(217, 221, 222);
 
-const MUTED_HOVER: Color = Color::rgb(159, 154, 171);
-const MUTED_ACTIVE: Color = Color::rgb(166, 162, 177);
-
+const PRIMARY: Color = PRIMARY_GREEN;
+const OUTLINE: Color = Color::rgb(172, 166, 149);
 
 pub fn theme() -> Theme {
     Theme {
@@ -66,7 +58,7 @@ pub fn build() -> impl Element {
         .spacing(SPACING);
 
         builder.add_flex(left, 1f32);
-
+        
         let middle = Flex::row(|builder| {
             builder.add_non_flex(Music);
         })
@@ -89,31 +81,31 @@ pub fn build() -> impl Element {
     Flex::row(create)
         .spacing(SPACING)
         .padding(PADDING)
-        .style(|| Some(flex::Style::solid_background(BASE)))
+        .style(|| Some(flex::Style::solid_background(BACKGROUND)))
 }
 
 fn battery_style(capacity: u8) -> battery::Style {
-    let background = if capacity >= 80 {
-        GOLD
-    } else if capacity >= 20 {
-        IRIS
+    let (background, text) = if capacity >= 80 {
+        (PRIMARY_GREEN, BACKGROUND)
+    } else if capacity > 20 {
+        (PRIMARY_ORANGE, TEXT)
     } else {
-        LOVE
+        (PRIMARY_RED, TEXT)
     };
 
     battery::Style {
-        body: SUBTLE,
+        body: OUTLINE,
         background: background.into(),
-        text: TEXT
+        text
     }
 }
 
 fn workspaces_style() -> workspaces::Style {
     workspaces::Style {
-        active: LOVE,
-        empty: MUTED,
+        active: PRIMARY,
+        empty: OUTLINE,
         text_color: TEXT,
-        selected_text_color: BASE
+        selected_text_color: BACKGROUND
     }
 }
 

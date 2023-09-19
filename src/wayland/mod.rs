@@ -142,7 +142,7 @@ impl BarWindow {
             &qh,
             surface,
             Layer::Top,
-            Option::<String>::None,
+            Some("mibar"),
             None
         );
 
@@ -334,7 +334,7 @@ impl OutputHandler for State {
 
         println!("New output: {:?}", info);
 
-        self.layer_surface.set_anchor(Anchor::BOTTOM);
+        self.layer_surface.set_anchor(Anchor::TOP);
         self.layer_surface.set_size(logical_size.0 as u32, 40);
         self.layer_surface.set_exclusive_zone(40);
         self.layer_surface.commit();
