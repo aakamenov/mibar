@@ -7,15 +7,10 @@ use std::{any::Any, mem::MaybeUninit};
 
 use hyprland::{WorkspacesChanged, start_listener_loop};
 
-use crate::{
-    wayland::{MouseEvent, MouseScrollDelta},
-    geometry::Size,
+use mibar_core::{
     widget::{size_constraints::SizeConstraints, Element, Widget},
-    ui::{
-        InitCtx, DrawCtx, LayoutCtx,
-        UpdateCtx, Event, ValueSender,
-        TypedId
-    }
+    MouseEvent, Size, InitCtx, DrawCtx, LayoutCtx,
+    UpdateCtx, Event, ValueSender, TypedId
 };
 
 const WORKSPACE_COUNT: usize = 8;

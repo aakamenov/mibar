@@ -5,7 +5,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt}
 };
 
-use crate::ui::ValueSender;
+use mibar_core::ValueSender;
 
 pub struct WorkspacesChanged {
     pub current: u8,

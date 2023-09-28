@@ -1,13 +1,13 @@
-use cosmic_text::Family;
-
-use crate::{
+use mibar::{
+    tokio,
     modules::{
         workspaces::{self, Workspaces},
         date_time::DateTime,
         battery::{self, Battery},
         cpu::Cpu,
         ram::Ram,
-        volume::{pulseaudio, PulseAudioVolume}
+        volume::{pulseaudio, PulseAudioVolume},
+        sys_info
     },
     widget::{
         music::Music,
@@ -15,8 +15,7 @@ use crate::{
         text,
         Element
     },
-    theme::{Theme, Font},
-    color::Color
+    Theme, Font, Family, Color
 };
 
 // Color palette: https://coolors.co/232f2e-293635-aca695-d9ddde-ff8000-70d900-ff4c57-00dbd7-ff64a2
@@ -37,7 +36,13 @@ const TEXT: Color = Color::rgb(217, 221, 222);
 const PRIMARY: Color = PRIMARY_GREEN;
 const OUTLINE: Color = Color::rgb(172, 166, 149);
 
-pub fn theme() -> Theme {
+#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
+async fn main() {
+    sys_info::init();
+    mibar::run(theme(), build).await;
+}
+
+fn theme() -> Theme {
     Theme {
         font: Font {
             family: Family::Name("SauceCodePro Nerd Font"),
@@ -49,7 +54,7 @@ pub fn theme() -> Theme {
     }
 }
 
-pub fn build() -> impl Element {
+fn build() -> impl Element {
     let create = |builder: &mut FlexBuilder| {
         let left = Flex::row(|builder| {
             builder.add_non_flex(Workspaces::new(workspaces_style));

@@ -4,3 +4,4 @@ pub mod cpu;
 pub mod ram;
 pub mod battery;
 pub mod volume;
+pub mod sys_info;

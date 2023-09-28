@@ -1,5 +1,4 @@
 use std::{
-    mem,
     num::NonZeroUsize,
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::{Hash, Hasher}
@@ -16,7 +15,11 @@ use cosmic_text::{
     SwashCache, SwashContent, Placement
 };
 
-use crate::{geometry::Size, theme::Font};
+use crate::{
+    geometry::Size,
+    theme::Font,
+    draw::{TextInfo, LineHeight}
+};
 
 const GLYPH_CACHE_SIZE: usize = 64;
 const TRIM_ROUNDS: u8 = 3;
@@ -27,27 +30,6 @@ pub struct Renderer {
     recently_used: HashSet<CacheKey>,
     trim_rounds: u8,
     glyph_cache: GlyphCache
-}
-
-#[derive(Clone, Debug)]
-pub struct TextInfo {
-    pub text: String,
-    pub size: f32,
-    pub line_height: LineHeight,
-    pub font: Font
-}
-
-// We use the same approach as Iced here. The rationale being
-// that multiplying the text size by 1.2 will work for most fonts.
-// So this is what is used as a default (LineHeight::Relative(1.2)).
-// Apparently this is what web browsers tend to do as well.
-// Otherwise, it can be set by the user if needed.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum LineHeight {
-    /// A scale that the size of the text is multiplied by.
-    Relative(f32),
-    /// An absolute height in logical pixels.
-    Absolute(f32)
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
@@ -371,34 +353,5 @@ impl CacheKey {
         info.font.hash(hasher);
 
         Self(hasher.finish())
-    }
-}
-
-impl LineHeight {
-    pub fn to_absolute(self, text_size: f32) -> f32 {
-        match self {
-            Self::Relative(scale) => scale * text_size,
-            Self::Absolute(height) => height
-        }
-    }
-}
-
-impl Hash for LineHeight {
-    #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        let variant = mem::discriminant(self);
-        
-        match self {
-            LineHeight::Relative(scale) => 
-                (variant, scale.to_bits()).hash(state),
-            LineHeight::Absolute(height) =>
-                (variant, height.to_bits()).hash(state)
-        }
-    }
-}
-
-impl Default for LineHeight {
-    fn default() -> Self {
-        Self::Relative(1.2)
     }
 }

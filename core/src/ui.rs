@@ -21,7 +21,8 @@ use crate::{
         size_constraints::SizeConstraints
     },
     theme::Theme,
-    renderer::{Renderer, TextInfo},
+    draw::TextInfo,
+    renderer::Renderer,
     wayland::MouseEvent
 };
 

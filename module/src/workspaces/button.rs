@@ -1,14 +1,7 @@
-use crate::{
-    wayland::{MouseEvent, MouseButton},
-    geometry::{Size, Rect},
+use mibar_core::{
     widget::{size_constraints::SizeConstraints, Element, Widget},
-    ui::{
-        InitCtx, DrawCtx, LayoutCtx,
-        UpdateCtx, Event
-    },
-    draw::Circle,
-    renderer::TextInfo,
-    color::Color
+    MouseEvent, MouseButton, Size, Rect, Circle, Color, Event,
+    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TextInfo
 };
 
 use super::hyprland;

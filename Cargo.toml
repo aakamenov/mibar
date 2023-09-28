@@ -1,14 +1,26 @@
 [package]
 name = "mibar"
+description = "A set of libraries for building status bars and desktop widgets on Wayland"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mibar-core.workspace = true
+mibar-module.workspace = true
+
+[workspace]
+members = [
+    "core",
+    "module",
+    "bar"
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
-smithay-client-toolkit = "0.17.0"
-tiny-skia = "0.11.1"
-nohash = "0.2.0"
-ahash = "0.8.3"
-cosmic-text = "0.9.0"
-lru = { version = "0.11.0", default-features = false }
+[workspace.dependencies]
+miibar = { path = "." }
+mibar-core = { path = "core" }
+mibar-module = { path = "module" }
 tokio = { version = "1.28.1", default-features = false, features = ["full"] }
-pulse = { package = "libpulse-binding", version = "2.0" }

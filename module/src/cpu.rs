@@ -1,12 +1,13 @@
-use crate::{
-    geometry::Size,
+use mibar_core::{
     widget::{
         size_constraints::SizeConstraints,
         Element, Widget, text::{self, Text}
     },
-    ui::{InitCtx, DrawCtx, LayoutCtx, ValueSender, TypedId},
-    sys_info
+    InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    ValueSender, TypedId, Size
 };
+
+use crate::sys_info;
 
 use tokio::{
     time::{Duration, interval},
@@ -88,7 +89,7 @@ impl Widget for CpuWidget {
 
     fn task_result(
         state: &mut Self::State,
-        ctx: &mut crate::ui::UpdateCtx,
+        ctx: &mut UpdateCtx,
         data: Box<dyn std::any::Any>
     ) {
         let usage = *data.downcast::<f64>().unwrap();

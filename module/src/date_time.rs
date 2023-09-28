@@ -1,18 +1,15 @@
 use std::{time::Duration, any::Any};
 use tokio::time::sleep;
 
-use crate::{
-    geometry::Size,
+use mibar_core::{
     widget::{
         size_constraints::SizeConstraints,
         Element, Widget, text::{self, Text}
     },
-    sys_info::Date,
-    ui::{
-        InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
-        TypedId
-    }
+    Size, InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId
 };
+
+use crate::sys_info::Date;
 
 pub struct DateTime {
     style: Option<text::StyleFn>

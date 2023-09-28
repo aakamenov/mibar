@@ -1,15 +1,22 @@
+pub mod widget;
 mod ui;
 mod geometry;
-mod widget;
 mod theme;
 mod renderer;
-mod bar;
 mod wayland;
-mod modules;
-mod sys_info;
 mod color;
 mod draw;
 mod gradient;
+
+pub use ui::*;
+pub use geometry::*;
+pub use theme::*;
+pub use wayland::*;
+pub use color::*;
+pub use draw::*;
+pub use gradient::*;
+pub use tokio;
+pub use cosmic_text::{Family, Stretch, Style, Weight};
 
 use tiny_skia::PixmapMut;
 use tokio::{
@@ -17,21 +24,14 @@ use tokio::{
     sync::mpsc::channel
 };
 
-use crate::{
-    ui::{Ui, Event, TaskResult},
-    geometry::Size,
-    wayland::{BarWindow, WaylandEvent}
-};
+use crate::widget::Element;
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
-async fn main() {
-    sys_info::init();
-
+pub async fn run<E: Element>(theme: Theme, build: impl FnOnce() -> E) {
     let mut window = BarWindow::new();
 
     // TODO: It'd be more efficient to process multiple results at once.
     let (tx, mut rx) = channel::<TaskResult>(100);
-    let mut ui = Ui::new(tx, bar::theme(), bar::build);
+    let mut ui = Ui::new(tx, theme, build);
 
     // Wait for the initial resize event
     {

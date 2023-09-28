@@ -7,18 +7,15 @@ use tokio::{
     task::JoinHandle
 };
 
-use crate::{
-    geometry::Size,
+use mibar_core::{
     widget::{
         size_constraints::SizeConstraints,
         text::{self, Text},
         Element, Widget
     },
-    wayland::{MouseEvent, MouseButton},
-    ui::{
-        InitCtx, UpdateCtx, DrawCtx, LayoutCtx,
-        Event, TypedId, ValueSender
-    }
+    Size, MouseEvent, MouseButton,
+    InitCtx, UpdateCtx, DrawCtx, LayoutCtx,
+    Event, TypedId, ValueSender
 };
 
 pub type FormatFn = fn(pulseaudio::State) -> String;

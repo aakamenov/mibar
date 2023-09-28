@@ -1,14 +1,11 @@
-use crate::{
-    geometry::{Size, Rect},
+use mibar_core::{
     widget::{
         size_constraints::SizeConstraints,
         Element, Widget
     },
-    ui::{InitCtx, DrawCtx, LayoutCtx, ValueSender},
-    renderer::TextInfo,
-    color::Color,
-    draw::{Quad, Background},
-    sys_info::battery
+    Size, Rect, InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    ValueSender, TextInfo, Color, Quad, Background,
+    Weight
 };
 
 use tokio::{
@@ -16,6 +13,9 @@ use tokio::{
     task::JoinHandle
 };
 
+use crate::sys_info::battery;
+
+// TODO: Make these parameters
 const UPDATE_INTERVAL: Duration = Duration::from_secs(30);
 const DEVICE: &str = "BAT0";
 
@@ -105,7 +105,7 @@ impl Element for Battery {
         });
 
         let mut font = ctx.theme().font;
-        font.weight = cosmic_text::Weight::BOLD;
+        font.weight = Weight::BOLD;
 
         let state = State {
             info: None,
@@ -139,7 +139,7 @@ impl Widget for BatteryWidget {
 
     fn task_result(
         state: &mut Self::State,
-        ctx: &mut crate::ui::UpdateCtx,
+        ctx: &mut UpdateCtx,
         data: Box<dyn std::any::Any>
     ) {
         let info = *data.downcast::<Option<BatteryInfo>>().unwrap();

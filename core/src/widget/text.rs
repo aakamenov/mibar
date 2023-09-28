@@ -1,7 +1,7 @@
 use crate::{
     geometry::Size,
     ui::{InitCtx, DrawCtx, LayoutCtx, UpdateCtx},
-    renderer::TextInfo,
+    draw::TextInfo,
     theme::Font,
     color::Color
 };

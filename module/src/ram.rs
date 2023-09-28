@@ -1,17 +1,19 @@
-use crate::{
-    geometry::Size,
+use mibar_core::{
     widget::{
         size_constraints::SizeConstraints,
         Element, Widget, text::{self, Text}
     },
-    ui::{InitCtx, DrawCtx, LayoutCtx, ValueSender, TypedId},
-    sys_info::{self, RamUsage}
+    InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    ValueSender, TypedId, Size
 };
 
 use tokio::{
     time::{Duration, interval},
     task::JoinHandle
 };
+
+use crate::sys_info::{self, RamUsage};
+
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 
@@ -91,7 +93,7 @@ impl Widget for RamWidget {
 
     fn task_result(
         state: &mut Self::State,
-        ctx: &mut crate::ui::UpdateCtx,
+        ctx: &mut UpdateCtx,
         data: Box<dyn std::any::Any>
     ) {
         let usage = *data.downcast::<RamUsage>().unwrap();

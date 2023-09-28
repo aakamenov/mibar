@@ -1,7 +1,5 @@
 mod text;
 
-pub use text::{TextInfo, LineHeight};
-
 use std::mem;
 
 use tiny_skia::{
@@ -13,7 +11,7 @@ use tiny_skia::{
 use crate::{
     geometry::{Rect, Point},
     color::Color,
-    draw::{Quad, Circle, BorderRadius, Background}
+    draw::{Quad, Circle, BorderRadius, Background, TextInfo}
 };
 
 pub struct Renderer {
