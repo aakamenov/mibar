@@ -83,7 +83,11 @@ impl Widget for WorkspacesWidget {
         }
     }
 
-    fn task_result(state: &mut Self::State, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
+    fn task_result(
+        state: &mut Self::State,
+        ctx: &mut UpdateCtx,
+        data: Box<dyn Any>
+    ) {
         let event = data.downcast::<WorkspacesChanged>().unwrap();
         let mut empty = [true; WORKSPACE_COUNT];
 
@@ -115,7 +119,11 @@ impl Widget for WorkspacesWidget {
         }
     }
 
-    fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+    fn layout(
+        state: &mut Self::State,
+        ctx: &mut LayoutCtx,
+        bounds: SizeConstraints
+    ) -> Size {
         let mut width = 0f32;
         let mut height = 0f32;
         let mut available = bounds.max.width;

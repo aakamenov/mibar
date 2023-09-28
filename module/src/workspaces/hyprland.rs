@@ -42,10 +42,10 @@ pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
     // Send an initial value.
     if let Some(workspaces) = get_workspaces(&mut buf, &mut workspaces_bytes).await {
         let event = WorkspacesChanged {
-            current,
+            current: active_workspace().await.map(|x| x.id).unwrap_or(current),
             workspaces
         };
-
+        
         sender.send(event).await;
     }
 
@@ -122,23 +122,46 @@ pub async fn change_workspace(id: u8) {
 
 #[inline]
 pub async fn move_workspace_next() {
-    let cmd = format!("dispatch workspace e+1");
-    dispatch_command(cmd.as_bytes()).await;
+    const CMD: &str = "dispatch workspace e+1";
+    dispatch_command(CMD.as_bytes()).await;
 }
 
 #[inline]
 pub async fn move_workspace_prev() {
-    let cmd = format!("dispatch workspace e-1");
-    dispatch_command(cmd.as_bytes()).await;
+    const CMD: &str = "dispatch workspace e-1";
+    dispatch_command(CMD.as_bytes()).await;
+}
+
+pub async fn active_workspace() -> Option<Workspace> {
+    const CMD: &str = "activeworkspace";
+
+    let Some(mut stream) = dispatch(CMD.as_bytes()).await else {
+        return None;
+    };
+
+    let mut buf = [0u8; 256];
+    match stream.read(&mut buf).await {
+        Ok(read) => {
+            let resp = unsafe {
+                str::from_utf8_unchecked(&buf[0..read])
+            };
+
+            parse_workspaces(&resp).pop()
+        },
+        Err(err) => {
+            eprintln!("Error reading Hyprland response: {err}");
+
+            None
+        }
+    }
 }
 
 async fn dispatch_command(cmd: &[u8]) {
-    let mut buf = [0u8; 64];
-
     let Some(mut write_stream) = dispatch(cmd).await else {
         return;
     };
 
+    let mut buf = [0u8; 64];
     match write_stream.read(&mut buf).await {
         Ok(read) => {
             let resp = unsafe {
