@@ -246,18 +246,11 @@ fn state_callback(ctx_ref: &ContextRc) {
                 CLIENT_STATE.store(INITIALIZED, Ordering::Release);
 
                 let mut ctx = ctx.borrow_mut();
-
-                let introspect = ctx.introspect();
-                introspect.get_sink_info_by_name(
-                    DEFAULT_SINK,
-                    default_sink_info_callback
-                );
-
-                // Populate state with initial info
-                introspect.get_sink_info_by_name(
-                    DEFAULT_SINK,
-                    sink_info_callback
-                );
+                ctx.introspect()
+                    .get_sink_info_by_name(
+                        DEFAULT_SINK,
+                        default_sink_info_callback
+                    );
 
                 ctx.subscribe(
                     InterestMaskSet::SERVER | InterestMaskSet::SINK,
@@ -293,15 +286,7 @@ fn subscribe_callback(ctx_ref: &ContextRc) {
 
             match facility {
                 Facility::Server => {
-                    ctx.borrow_mut()
-                        .introspect()
-                        .get_sink_info_by_name(
-                            DEFAULT_SINK,
-                            default_sink_info_callback
-                        );
-                }
-                Facility::Sink if op == subscribe::Operation::New => {
-                    ctx.borrow_mut()
+                     ctx.borrow_mut()
                         .introspect()
                         .get_sink_info_by_name(
                             DEFAULT_SINK,
@@ -328,19 +313,8 @@ fn subscribe_callback(ctx_ref: &ContextRc) {
 }
 
 fn sink_info_callback(result: ListResult<&SinkInfo>) {
-    let ListResult::Item(sink) = result else {
-        return;
-    };
-
-    let percent = sink.volume.max().0 as f32 * 100f32 /
-        Volume::NORMAL.0 as f32 + 0.5;
-
-    let lock = SENDER.read().unwrap();
-    if let Some(sender) = lock.as_ref().and_then(|x| Some(x)) {
-        sender.send_modify(|val| {
-            val.volume = percent as u8;
-            val.is_muted = sink.mute;
-        });
+    if let ListResult::Item(sink) = result {
+        update_volume(sink);
     }
 }
 
@@ -350,14 +324,30 @@ fn default_sink_info_callback(result: ListResult<&SinkInfo>) {
         ListResult::Item(sink) => unsafe {
             HAS_DEFAULT_SINK = true;
             *index = Some(sink.index);
+
+            update_volume(sink);
         }
         ListResult::End | ListResult::Error => unsafe {
             if !HAS_DEFAULT_SINK {
+                // No default sink.
                 *index = None;
             }
 
             HAS_DEFAULT_SINK = false;
         }
+    }
+}
+
+fn update_volume(sink: &SinkInfo) {
+    let percent = sink.volume.max().0 as f32 * 100f32 /
+        Volume::NORMAL.0 as f32 + 0.5;
+
+    let lock = SENDER.read().unwrap();
+    if let Some(sender) = lock.as_ref().and_then(|x| Some(x)) {
+        sender.send_modify(|val| {
+            val.volume = percent as u8;
+            val.is_muted = sink.mute;
+        });
     }
 }
 
