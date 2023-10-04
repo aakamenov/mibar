@@ -10,17 +10,16 @@ use mibar::{
         sys_info
     },
     widget::{
-        music::Music,
-        flex::{self, Flex, FlexBuilder, Alignment},
+        flex::{self, Flex, FlexBuilder},
         text,
-        Element
+        Element, Padding, Alignment
     },
     Theme, Font, Family, Color
 };
 
 // Color palette: https://coolors.co/232f2e-293635-aca695-d9ddde-ff8000-70d900-ff4c57-00dbd7-ff64a2
 
-const PADDING: f32 = 6f32;
+const PADDING: Padding = Padding::new(2f32, 6f32, 2f32, 6f32);
 const SPACING: f32 = 10f32;
 
 const PRIMARY_RED: Color = Color::rgb(255, 76, 87);
@@ -64,13 +63,6 @@ fn build() -> impl Element {
 
         builder.add_flex(left, 1f32);
         
-        let middle = Flex::row(|builder| {
-            builder.add_non_flex(Music);
-        })
-        .spacing(SPACING);
-
-        builder.add_flex(middle, 2f32);
-
         let right = Flex::row(|builder| {
             builder.add_non_flex(PulseAudioVolume::new(format_audio));
             builder.add_non_flex(Battery::new(battery_style));

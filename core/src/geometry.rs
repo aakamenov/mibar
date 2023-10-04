@@ -1,5 +1,7 @@
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
+use crate::widget::Padding;
+
 // This code was basically taken from Xilem/Kurbo.
 pub trait FloatExt {
     fn expand(&self) -> f32;
@@ -171,6 +173,13 @@ impl Vector {
     #[inline]
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
+    }
+}
+
+impl From<Padding> for Size {
+    #[inline]
+    fn from(value: Padding) -> Self {
+        Self::new(value.horizontal(), value.vertical())
     }
 }
 

@@ -3,8 +3,8 @@ use tokio::time::sleep;
 
 use mibar_core::{
     widget::{
-        size_constraints::SizeConstraints,
-        Element, Widget, text::{self, Text}
+        text::{self, Text},
+        Element, Widget, SizeConstraints
     },
     Size, InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId
 };

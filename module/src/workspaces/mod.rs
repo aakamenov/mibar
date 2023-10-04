@@ -8,7 +8,7 @@ use std::{any::Any, mem::MaybeUninit};
 use hyprland::{WorkspacesChanged, start_listener_loop};
 
 use mibar_core::{
-    widget::{size_constraints::SizeConstraints, Element, Widget},
+    widget::{SizeConstraints, Element, Widget},
     MouseEvent, Size, InitCtx, DrawCtx, LayoutCtx,
     UpdateCtx, Event, ValueSender, TypedId
 };

@@ -1,5 +1,5 @@
 use mibar_core::{
-    widget::{size_constraints::SizeConstraints, Element, Widget},
+    widget::{SizeConstraints, Element, Widget},
     MouseEvent, MouseButton, Size, Rect, Circle, Color, Event,
     InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TextInfo
 };

@@ -17,8 +17,7 @@ use tokio::{
 use crate::{
     geometry::{Rect, Size, Point},
     widget::{
-        Element, Widget, AnyWidget,
-        size_constraints::SizeConstraints
+        Element, Widget, AnyWidget, SizeConstraints
     },
     theme::Theme,
     draw::TextInfo,

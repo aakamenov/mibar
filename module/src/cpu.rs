@@ -1,7 +1,7 @@
 use mibar_core::{
     widget::{
-        size_constraints::SizeConstraints,
-        Element, Widget, text::{self, Text}
+        text::{self, Text},
+        SizeConstraints, Element, Widget
     },
     InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
     ValueSender, TypedId, Size

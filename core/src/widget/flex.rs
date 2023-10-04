@@ -1,5 +1,5 @@
 use crate::{
-    geometry::{Size, Rect},
+    geometry::Size,
     draw::Quad,
     draw::{Background, BorderRadius},
     color::Color,
@@ -9,8 +9,8 @@ use crate::{
     }
 };
 use super::{
-    size_constraints::SizeConstraints,
-    Element, Widget
+    SizeConstraints, Padding,
+    Alignment, Axis, Element, Widget
 };
 
 pub type StyleFn = fn() -> Option<Style>;
@@ -21,7 +21,7 @@ pub struct Flex<F: FnOnce(&mut FlexBuilder)> {
     main_alignment: Alignment,
     cross_alignment: Alignment,
     spacing: f32,
-    padding: f32,
+    padding: Padding,
     style: Option<StyleFn>
 }
 
@@ -38,7 +38,7 @@ pub struct State {
     main_alignment: Alignment,
     cross_alignment: Alignment,
     spacing: f32,
-    padding: f32,
+    padding: Padding,
     style: Option<StyleFn>
 }
 
@@ -48,19 +48,6 @@ pub struct Style {
     pub border_radius: BorderRadius,
     pub border_width: f32,
     pub border_color: Background
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Alignment {
-    Start,
-    Center,
-    End
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Axis {
-    Horizontal,
-    Vertical
 }
 
 impl<F: FnOnce(&mut FlexBuilder)> Flex<F> {
@@ -75,8 +62,8 @@ impl<F: FnOnce(&mut FlexBuilder)> Flex<F> {
     }
 
     #[inline]
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.padding = padding;
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.padding = padding.into();
 
         self
     }
@@ -117,7 +104,7 @@ impl<F: FnOnce(&mut FlexBuilder)> Flex<F> {
             main_alignment: Alignment::Start,
             cross_alignment: Alignment::Center,
             spacing: 0f32,
-            padding: 0f32,
+            padding: Padding::ZERO,
             style: None
         }
     }
@@ -188,9 +175,7 @@ impl Widget for FlexWidget {
     // Simplified version of the Flutter flex layout algorithm:
     // https://api.flutter.dev/flutter/widgets/Flex-class.html
     fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
-        let layout_bounds = bounds.shrink(
-            Size::new(state.padding * 2f32, state.padding * 2f32)
-        );
+        let layout_bounds = bounds.pad(state.padding);
         let spacing = state.spacing *
             state.children.len().saturating_sub(1) as f32;
 
@@ -263,7 +248,14 @@ impl Widget for FlexWidget {
         }
 
         let mut main = match state.main_alignment {
-            Alignment::Start => state.padding,
+            Alignment::Start => {
+                let (main_padding, _) = state.axis.main_and_cross(
+                    state.padding.left,
+                    state.padding.top
+                );
+
+                main_padding  
+            }
             Alignment::Center => (state.axis.main(layout_bounds.max) -
                 spacing -
                 total_main) /
@@ -279,7 +271,7 @@ impl Widget for FlexWidget {
                 main += state.spacing;
             }
 
-            let origin = state.axis.main_and_cross(main, state.padding);
+            let origin = state.axis.main_and_cross(main, state.padding.top);
 
             let rect = ctx.position(child, |rect| {
                 rect.set_origin(origin);
@@ -289,12 +281,15 @@ impl Widget for FlexWidget {
             main += state.axis.main(rect.size());
         }
 
-        let (width, height) = state.axis.main_and_cross(main - state.padding, cross);
+        let (width, height) = state.axis.main_and_cross(
+            main - state.padding.right,
+            cross
+        );
         let size = layout_bounds.constrain(Size::new(width, height));
 
         Size::new(
-            size.width + (state.padding * 2f32),
-            size.height + (state.padding * 2f32)
+            size.width + (state.padding.horizontal()),
+            size.height + (state.padding.vertical())
         )
     }
 
@@ -317,63 +312,6 @@ impl Widget for FlexWidget {
     fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
         for (child, _) in &state.children {
             ctx.event(child, event);
-        }
-    }
-}
-
-impl Axis {
-    #[inline]
-    pub fn flip(&self) -> Self {
-        match self {
-            Self::Horizontal => Self::Vertical,
-            Self::Vertical => Self::Horizontal
-        }
-    }
-
-    #[inline]
-    pub fn main(&self, size: Size) -> f32 {
-        match self {
-            Self::Horizontal => size.width,
-            Self::Vertical => size.height
-        }
-    }
-
-    #[inline]
-    pub fn cross(&self, size: Size) -> f32 {
-        match self {
-            Self::Horizontal => size.height,
-            Self::Vertical => size.width
-        }
-    }
-
-    #[inline]
-    pub fn main_and_cross_size(&self, size: Size) -> (f32, f32) {
-        match self {
-            Self::Horizontal => (size.width, size.height),
-            Self::Vertical => (size.height, size.width)
-        }
-    }
-
-    #[inline]
-    pub fn main_and_cross(&self, main: f32, cross: f32) -> (f32, f32) {
-        match self {
-            Self::Horizontal => (main, cross),
-            Self::Vertical => (cross, main)
-        }
-    }
-}
-
-impl Alignment {
-    fn align(&self, rect: &mut Rect, space: f32, axis: Axis) {
-        let (value, size) = match axis {
-            Axis::Horizontal => (&mut rect.x, rect.width),
-            Axis::Vertical => (&mut rect.y, rect.height)
-        };
-
-        match self {
-            Self::Start => { }
-            Self::Center => *value += (space - size) / 2f32,
-            Self::End => *value += space - size
         }
     }
 }

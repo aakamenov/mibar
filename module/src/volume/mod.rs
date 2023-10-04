@@ -9,9 +9,8 @@ use tokio::{
 
 use mibar_core::{
     widget::{
-        size_constraints::SizeConstraints,
         text::{self, Text},
-        Element, Widget
+        Element, Widget, SizeConstraints
     },
     Size, MouseEvent, MouseButton,
     InitCtx, UpdateCtx, DrawCtx, LayoutCtx,

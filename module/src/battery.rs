@@ -1,8 +1,5 @@
 use mibar_core::{
-    widget::{
-        size_constraints::SizeConstraints,
-        Element, Widget
-    },
+    widget::{SizeConstraints, Element, Widget},
     Size, Rect, InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
     ValueSender, TextInfo, Color, Quad, Background,
     Weight

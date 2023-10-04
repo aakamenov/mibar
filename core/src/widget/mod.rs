@@ -1,7 +1,10 @@
-pub mod size_constraints;
-pub mod music;
 pub mod flex;
 pub mod text;
+mod layout;
+
+pub use layout::*; 
+pub use flex::{Flex, FlexBuilder};
+pub use text::Text;
 
 use std::any::{Any, type_name};
 
@@ -12,7 +15,6 @@ use crate::{
         UpdateCtx, Event
     }
 };
-use size_constraints::SizeConstraints;
 
 pub trait Element {
     type Widget: Widget + 'static;

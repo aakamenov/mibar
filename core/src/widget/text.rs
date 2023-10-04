@@ -5,10 +5,7 @@ use crate::{
     theme::Font,
     color::Color
 };
-use super::{
-    size_constraints::SizeConstraints,
-    Element, Widget
-};
+use super::{SizeConstraints, Element, Widget};
 
 pub type StyleFn = fn() -> Style;
 
