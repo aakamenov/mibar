@@ -19,6 +19,11 @@ pub struct BorderRadius(pub [f32; 4]);
 #[derive(Clone, Debug)]
 pub struct Quad {
     pub rect: Rect,
+    pub style: QuadStyle
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct QuadStyle {
     pub background: Background,
     pub border_radius: BorderRadius,
     pub border_width: f32,
@@ -60,10 +65,12 @@ impl Quad {
     pub fn new(rect: Rect, background: impl Into<Background>) -> Self {
         Self {
             rect,
-            background: background.into(),
-            border_radius: BorderRadius::default(),
-            border_width: 0f32,
-            border_color: Background::Color(Color::TRANSPARENT)
+            style: QuadStyle {
+                background: background.into(),
+                border_radius: BorderRadius::default(),
+                border_width: 0f32,
+                border_color: Background::Color(Color::TRANSPARENT)
+            }
         }
     }
 
@@ -75,11 +82,57 @@ impl Quad {
     ) -> Self {
         Self {
             rect,
-            background: background.into(),
-            border_radius: border_radius.into(),
+            style: QuadStyle {
+                background: background.into(),
+                border_radius: border_radius.into(),
+                border_width: 0f32,
+                border_color: Background::Color(Color::TRANSPARENT)
+            }
+        }
+    }
+
+    #[inline]
+    pub fn with_border(
+        mut self,
+        width: f32,
+        color: impl Into<Background>
+    ) -> Self {
+        self.style.border_width = width;
+        self.style.border_color = color.into();
+
+        self
+    }
+}
+
+impl QuadStyle {
+    #[inline]
+    pub fn solid_background(background: Color) -> Self {
+        Self {
+            background: Background::Color(background),
+            border_radius: 0f32.into(),
             border_width: 0f32,
             border_color: Background::Color(Color::TRANSPARENT)
         }
+    }
+
+    #[inline]
+    pub fn gradient(gradient: LinearGradient) -> Self {
+        Self {
+            background: Background::LinearGradient(gradient),
+            border_radius: 0f32.into(),
+            border_width: 0f32,
+            border_color: Background::Color(Color::TRANSPARENT)
+        }
+    }
+
+    #[inline]
+    pub fn rounded(
+        mut self,
+        border_radius: impl Into<BorderRadius>
+    ) -> Self {
+        self.border_radius = border_radius.into();
+
+        self
     }
 
     #[inline]

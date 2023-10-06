@@ -1,8 +1,7 @@
 use crate::{
     geometry::Size,
     draw::Quad,
-    draw::{Background, BorderRadius},
-    color::Color,
+    draw::QuadStyle,
     ui::{
         InitCtx,DrawCtx, LayoutCtx,
         UpdateCtx, Event, Id
@@ -13,7 +12,7 @@ use super::{
     Alignment, Axis, Element, Widget
 };
 
-pub type StyleFn = fn() -> Option<Style>;
+pub type StyleFn = fn() -> QuadStyle;
  
 pub struct Flex<F: FnOnce(&mut FlexBuilder)> {
     create: F,
@@ -40,14 +39,6 @@ pub struct State {
     spacing: f32,
     padding: Padding,
     style: Option<StyleFn>
-}
-
-#[derive(Clone, PartialEq, Debug)]
-pub struct Style {
-    pub background: Background,
-    pub border_radius: BorderRadius,
-    pub border_width: f32,
-    pub border_color: Background
 }
 
 impl<F: FnOnce(&mut FlexBuilder)> Flex<F> {
@@ -294,13 +285,10 @@ impl Widget for FlexWidget {
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        if let Some(style) = state.style.unwrap_or(ctx.theme().flex)() {
+        if let Some(style) = state.style {
             ctx.renderer.fill_quad(Quad {
                 rect: ctx.layout(),
-                background: style.background,
-                border_radius: style.border_radius,
-                border_width: style.border_width,
-                border_color: style.border_color
+                style: style()
             });
         }
 
@@ -312,17 +300,6 @@ impl Widget for FlexWidget {
     fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
         for (child, _) in &state.children {
             ctx.event(child, event);
-        }
-    }
-}
-
-impl Style {
-    pub fn solid_background(background: Color) -> Self {
-        Self {
-            background: background.into(),
-            border_radius: 0f32.into(),
-            border_width: 0f32,
-            border_color: Color::TRANSPARENT.into()
         }
     }
 }

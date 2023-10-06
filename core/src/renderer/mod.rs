@@ -78,10 +78,10 @@ impl Renderer {
         self.commands.push(
             Command::Draw(Primitive::Quad {
                 rect: quad.rect,
-                background: quad.background.into(),
-                border_radius: quad.border_radius,
-                border_width: quad.border_width,
-                border_color: quad.border_color.into()
+                background: quad.style.background.into(),
+                border_radius: quad.style.border_radius,
+                border_width: quad.style.border_width,
+                border_color: quad.style.border_color.into()
             })
         );
     }

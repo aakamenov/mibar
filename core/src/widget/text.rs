@@ -7,7 +7,7 @@ use crate::{
 };
 use super::{SizeConstraints, Element, Widget};
 
-pub type StyleFn = fn() -> Style;
+pub type StyleFn = fn() -> Color;
 
 pub struct Text {
     text: String,
@@ -20,18 +20,14 @@ pub struct TextWidget;
 
 #[derive(Debug)]
 pub enum Message {
-    SetText(String)
+    SetText(String),
+    SetStyle(StyleFn)
 }
 
 #[derive(Debug)]
 pub struct State {
     info: TextInfo,
     style: Option<StyleFn>
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct Style {
-    pub color: Color
 }
 
 impl Text {
@@ -104,6 +100,10 @@ impl Element for Text {
                     ctx.request_layout();
                 }
             }
+            Message::SetStyle(style) => {
+                state.style = Some(style);
+                ctx.request_redraw();
+            }
         }
     }
 }
@@ -121,7 +121,7 @@ impl Widget for TextWidget {
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
         let style = state.style.unwrap_or(ctx.theme().text);
-        let color = (style)().color;
+        let color = (style)();
         
         ctx.renderer.fill_text(&state.info, ctx.layout(), color);
     }

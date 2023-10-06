@@ -10,11 +10,10 @@ use mibar::{
         sys_info
     },
     widget::{
-        flex::{self, Flex, FlexBuilder},
-        text,
+        flex::{Flex, FlexBuilder},
         Element, Padding, Alignment
     },
-    Theme, Font, Family, Color
+    Theme, Font, Family, Color, QuadStyle
 };
 
 // Color palette: https://coolors.co/232f2e-293635-aca695-d9ddde-ff8000-70d900-ff4c57-00dbd7-ff64a2
@@ -28,8 +27,8 @@ const PRIMARY_GREEN: Color = Color::rgb(112, 217, 0);
 const PRIMARY_ORANGE: Color = Color::rgb(255, 128, 0);
 //const PRIMARY_PINK: Color = Color::rgb(255, 100, 162);
 
-//const BASE: Color = Color::rgb(35, 47, 46);
-const BACKGROUND: Color = Color::rgb(41, 54, 53);
+const BASE: Color = Color::rgb(35, 47, 46);
+//const BACKGROUND: Color = Color::rgb(41, 54, 53);
 const TEXT: Color = Color::rgb(217, 221, 222);
 
 const PRIMARY: Color = PRIMARY_GREEN;
@@ -48,8 +47,10 @@ fn theme() -> Theme {
             ..Font::default()
         },
         font_size: 16f32,
-        text: || text::Style { color: TEXT },
-        flex: || { None }
+        text: || TEXT,
+        button: |_| QuadStyle::solid_background(Color::TRANSPARENT)
+            .rounded(4f32)
+            .with_border(1f32, OUTLINE)
     }
 }
 
@@ -78,12 +79,12 @@ fn build() -> impl Element {
     Flex::row(create)
         .spacing(SPACING)
         .padding(PADDING)
-        .style(|| Some(flex::Style::solid_background(BACKGROUND)))
+        .style(|| QuadStyle::solid_background(BASE))
 }
 
 fn battery_style(capacity: u8) -> battery::Style {
     let (background, text) = if capacity >= 80 {
-        (PRIMARY_GREEN, BACKGROUND)
+        (PRIMARY_GREEN, BASE)
     } else if capacity > 20 {
         (PRIMARY_ORANGE, TEXT)
     } else {
@@ -102,7 +103,7 @@ fn workspaces_style() -> workspaces::Style {
         active: PRIMARY,
         empty: OUTLINE,
         text_color: TEXT,
-        selected_text_color: BACKGROUND
+        selected_text_color: BASE
     }
 }
 
