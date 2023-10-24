@@ -76,7 +76,7 @@ impl Element for PulseAudioVolume {
                     match subscription.changed().await {
                         Ok(_) => {
                             let state = subscription.borrow().clone();
-                            sender.send(state).await;
+                            sender.send(state);
                         }
                         Err(_) => {
                             // Channel was closed, attempt to start the client again.

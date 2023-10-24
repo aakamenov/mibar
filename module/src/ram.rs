@@ -64,7 +64,7 @@ impl Element for Ram {
 
                 loop {
                     interval.tick().await;
-                    sender.send(sys_info::ram_usage()).await;
+                    sender.send(sys_info::ram_usage());
                 }
             }
         });

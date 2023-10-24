@@ -79,14 +79,14 @@ impl Element for Battery {
 
                     if let Err(err) = capacity {
                         eprintln!("Error reading battery capacity: {}", err);
-                        sender.send(None).await;
+                        sender.send(None);
 
                         continue;
                     }
 
                     if let Err(err) = status {
                         eprintln!("Error reading battery status: {}", err);
-                        sender.send(None).await;
+                        sender.send(None);
 
                         continue;
                     }
@@ -96,7 +96,7 @@ impl Element for Battery {
                         status: status.unwrap()
                     };
 
-                    sender.send(Some(info)).await;
+                    sender.send(Some(info));
                 }
             }
         });

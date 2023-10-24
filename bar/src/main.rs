@@ -13,7 +13,8 @@ use mibar::{
         flex::{Flex, FlexBuilder},
         Element, Padding, Alignment
     },
-    Theme, Font, Family, Color, QuadStyle
+    window::{BarWindow, Location},
+    Theme, Font, Family, Color, QuadStyle, run
 };
 
 // Color palette: https://coolors.co/232f2e-293635-aca695-d9ddde-ff8000-70d900-ff4c57-00dbd7-ff64a2
@@ -34,10 +35,16 @@ const TEXT: Color = Color::rgb(217, 221, 222);
 const PRIMARY: Color = PRIMARY_GREEN;
 const OUTLINE: Color = Color::rgb(172, 166, 149);
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
-async fn main() {
-    sys_info::init();
-    mibar::run(theme(), build).await;
+fn main() {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all();
+
+    let window = BarWindow {
+        location: Location::Top,
+        size: 40
+    };
+
+    run(builder, window, build(), theme(), |_| sys_info::init());
 }
 
 fn theme() -> Theme {

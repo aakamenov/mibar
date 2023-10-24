@@ -9,10 +9,8 @@ use std::{
 
 use tiny_skia::PixmapMut;
 use nohash::IntMap;
-use tokio::{
-    sync::mpsc::Sender,
-    task::JoinHandle
-};
+use tokio::{runtime, task::JoinHandle, sync::mpsc::UnboundedSender};
+use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
 use crate::{
     geometry::{Rect, Size, Point},
@@ -22,17 +20,12 @@ use crate::{
     theme::Theme,
     draw::TextInfo,
     renderer::Renderer,
-    wayland::MouseEvent
+    wayland::{WindowEvent, MouseEvent},
+    client::{UiRequest, WindowId, WindowAction},
+    window::Window
 };
 
 type WidgetId = u64;
-
-pub struct Ui {
-    ctx: UiCtx,
-    root: Id,
-    size: Size,
-    renderer: Renderer
-}
 
 pub struct TaskResult {
     id: WidgetId,
@@ -58,18 +51,6 @@ pub struct TypedId<E: Element> {
 
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub struct Id(WidgetId);
-
-pub struct UiCtx {
-    pub theme: Theme,
-    mouse_pos: Point,
-    widgets: IntMap<WidgetId, WidgetState>,
-    id_counter: u64,
-    needs_redraw: bool,
-    needs_layout: bool,
-    parent_to_children: IntMap<WidgetId, Vec<WidgetId>>,
-    child_to_parent: IntMap<WidgetId, WidgetId>,
-    task_sender: Sender<TaskResult>
-}
 
 pub struct LayoutCtx<'a> {
     renderer: &'a mut Renderer,
@@ -97,6 +78,36 @@ pub enum Event {
     Mouse(MouseEvent)
 }
 
+#[derive(Debug)]
+pub(crate) enum UiEvent {
+    Window(WindowEvent),
+    Task(TaskResult)
+}
+
+pub(crate) struct Ui {
+    ctx: UiCtx,
+    root: Id,
+    size: Size,
+    renderer: Renderer
+}
+
+pub(crate) struct UiCtx {
+    // TODO: This approach to theming is no longer viable
+    // with multi windows.
+    pub theme: Theme,
+    mouse_pos: Point,
+    widgets: IntMap<WidgetId, WidgetState>,
+    id_counter: u64,
+    needs_redraw: bool,
+    needs_layout: bool,
+    parent_to_children: IntMap<WidgetId, Vec<WidgetId>>,
+    child_to_parent: IntMap<WidgetId, WidgetId>,
+    rt_handle: runtime::Handle,
+    task_send: Sender<TaskResult>,
+    client_send: UnboundedSender<UiRequest>,
+    window_id: WindowId
+}
+
 struct WidgetState {
     widget: Box<dyn AnyWidget>,
     state: Box<dyn Any>,
@@ -105,9 +116,12 @@ struct WidgetState {
 
 impl Ui {
     pub fn new<E: Element>(
-        task_sender: Sender<TaskResult>,
+        window_id: WindowId,
+        rt_handle: runtime::Handle,
+        task_send: Sender<TaskResult>,
+        client_send: UnboundedSender<UiRequest>,
         theme: Theme,
-        build: impl FnOnce() -> E
+        root: E
     ) -> Self {
         let mut ctx = UiCtx {
             theme,
@@ -122,7 +136,10 @@ impl Ui {
             needs_layout: false,
             parent_to_children: IntMap::default(),
             child_to_parent: IntMap::default(),
-            task_sender
+            rt_handle,
+            task_send,
+            client_send,
+            window_id
         };
 
         let mut init_ctx = InitCtx {
@@ -130,7 +147,7 @@ impl Ui {
             ui: &mut ctx
         };
 
-        let root = init_ctx.new_child(build());
+        let root = init_ctx.new_child(root);
 
         Self {
             root: root.into(),
@@ -224,8 +241,8 @@ impl Ui {
         ctx.layout(&self.root, SizeConstraints::tight(self.size));
 
         // Translate all widget positions from parent local space
-        // to window space. This feels like a giant hack but enables
-        // granular updates as otherwise the only way to translate
+        // to window space. This feels like a giant hack but enables us to have
+        // a separate draw step as otherwise the only way to translate
         // to window space during draw would be to walk the widget
         // tree for EACH widget that is to be redrawn/updated. So we do this
         // only once here instead.
@@ -496,7 +513,7 @@ You can ignore the return value otherwise."]
             &self,
             task: impl Future<Output = ()> + Send + 'static
         ) -> JoinHandle<()> {
-            tokio::spawn(task)
+            self.ui.rt_handle.spawn(task)
         }
 
         #[doc = r"A task that produces a single value and when complete calls
@@ -511,16 +528,17 @@ You can ignore the return value otherwise."]
             &self,
             task: impl Future<Output = T> + Send + 'static
         ) -> JoinHandle<()> {
-            let tx = self.ui.task_sender.clone();
+            let tx = self.ui.task_send.clone();
             let id = self.current;
     
-            tokio::spawn(async move {
+            self.ui.rt_handle.spawn(async move {
                 let result = task.await;
-                
-                tx.send(TaskResult {
+                let result = TaskResult {
                     id,
                     data: Box::new(result)
-                }).await.unwrap();
+                };
+
+                tx.send(result).unwrap();
             })
         }
     
@@ -540,10 +558,39 @@ You can ignore the return value otherwise."]
         {
             let sender = ValueSender::new(
                 self.current,
-                self.ui.task_sender.clone()
+                self.ui.task_send.clone()
             );
     
-            tokio::spawn(create_future(sender))
+            self.ui.rt_handle.spawn(create_future(sender))
+        }
+
+        pub fn open_window(
+            &self,
+            window: impl Into<Window>,
+            root: impl Element + Send + 'static
+        ) -> WindowId {
+            let id = WindowId::new();
+
+            let theme = self.ui.theme.clone();
+            let create_ui = Box::new(move |rt_handle, task_send, client_send| {
+                Ui::new(id, rt_handle, task_send, client_send, theme, root)
+            });
+
+            self.ui.client_send.send(UiRequest {
+                id,
+                action: WindowAction::Open {
+                    window: window.into(),
+                    create_ui
+                }
+            }).unwrap();
+
+            id
+        }
+
+        pub fn close_window(&self, id: WindowId) {
+            self.ui.client_send.send(
+                UiRequest { id, action: WindowAction::Close }
+            ).unwrap();
         }
     }
 }
@@ -587,13 +634,13 @@ impl<T: Send + 'static> ValueSender<T> {
         }
     }
 
-    pub async fn send(&self, value: T) {
+    pub fn send(&self, value: T) {
         let result = TaskResult {
             id: self.id,
             data: Box::new(value)
         };
 
-        self.sender.send(result).await.unwrap()
+        self.sender.send(result).unwrap()
     }
 }
 

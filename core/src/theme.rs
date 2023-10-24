@@ -1,6 +1,7 @@
 use cosmic_text::{Family, Stretch, Style, Weight};
 use crate::widget::{text, button};
 
+#[derive(Clone, Debug)]
 pub struct Theme {
     pub font: Font,
     pub font_size: f32,

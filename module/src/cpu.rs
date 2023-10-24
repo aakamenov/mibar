@@ -60,7 +60,7 @@ impl Element for Cpu {
 
                 loop {
                     interval.tick().await;
-                    sender.send(sys_info::cpu_usage()).await;
+                    sender.send(sys_info::cpu_usage());
                 }
             }
         });
