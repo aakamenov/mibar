@@ -36,19 +36,21 @@ pub(crate) enum WindowAction {
             UnboundedSender<UiRequest>
         ) -> Ui + Send>
     },
-    Close
+    Close,
+    ThemeChanged(Theme)
 }
 
 #[derive(Debug)]
 pub(crate) enum ClientRequest {
-    Close
+    Close,
+    ThemeChanged(Theme)
 }
 
 pub fn run(
     mut builder: runtime::Builder,
     window: impl Into<Window>,
     root: impl Element + Send + 'static,
-    theme: Theme,
+    mut theme: Theme,
     // TODO: Temporary hack to init sysinfo
     on_init: impl FnOnce(&runtime::Handle)
 ) {
@@ -58,8 +60,9 @@ pub fn run(
     let (ui_send, mut ui_recv) = unbounded_channel::<UiRequest>();
 
     let id = WindowId::new();
+    let theme_clone = theme.clone();
     let create_ui = Box::new(move |rt_handle, task_send, client_send| {
-        Ui::new(id, rt_handle, task_send, client_send, theme, root)
+        Ui::new(id, rt_handle, task_send, client_send, theme_clone, root)
     });
 
     ui_send.send(UiRequest {
@@ -104,7 +107,7 @@ pub fn run(
                             }
                         }
                     });
-                },
+                }
                 WindowAction::Close => {
                     if let Entry::Occupied(entry) = windows.entry(request.id) {
                         if entry.get().send(ClientRequest::Close).is_err() {
@@ -115,6 +118,21 @@ pub fn run(
                     if windows.is_empty() {
                         break;
                     }
+                }
+                WindowAction::ThemeChanged(new_theme) => {
+                    for (id, sender) in &windows {
+                        if *id == request.id {
+                            continue;
+                        }
+
+                        if sender.send(
+                            ClientRequest::ThemeChanged(new_theme.clone())
+                        ).is_err() {
+                            eprintln!("Child UI thread has terminated unexpectedly!");
+                        }
+                    }
+
+                    theme = new_theme;
                 }
             }
         }

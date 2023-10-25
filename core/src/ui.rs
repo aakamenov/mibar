@@ -46,7 +46,7 @@ pub struct TypedId<E: Element> {
         &mut UpdateCtx,
         E::Message
     ),
-    data: std::marker::PhantomData<E>
+    data: PhantomData<E>
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
@@ -92,9 +92,13 @@ pub(crate) struct Ui {
 }
 
 pub(crate) struct UiCtx {
-    // TODO: This approach to theming is no longer viable
-    // with multi windows.
-    pub theme: Theme,
+    // Each Ui keeps a local copy of the current Theme. Whenever the theme
+    // is mutated, the Ui sends a request to the client which then propagates
+    // the changes to all the other windows. This may be more expensive than
+    // using a mutex but changing the theme in practice happens rarely (if ever)
+    // as opposed to synchronizing access every time we want to read it which
+    // occurs multiple times per UI re-draw.
+    theme: Theme,
     mouse_pos: Point,
     widgets: IntMap<WidgetId, WidgetState>,
     id_counter: u64,
@@ -155,6 +159,11 @@ impl Ui {
             size: Size::ZERO,
             renderer: Renderer::new()
         }
+    }
+
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.ctx.theme = theme;
+        self.ctx.needs_redraw = true;
     }
 
     pub fn layout(&mut self, size: Size) {
@@ -562,6 +571,23 @@ You can ignore the return value otherwise."]
             );
     
             self.ui.rt_handle.spawn(create_future(sender))
+        }
+
+        pub fn theme_mut(&mut self, change: impl FnOnce(&mut Theme)) {
+            change(&mut self.ui.theme);
+            self.ui.needs_redraw = true;
+
+            self.ui.client_send.send(
+                UiRequest {
+                    id: self.ui.window_id,
+                    action: WindowAction::ThemeChanged(self.ui.theme.clone())
+                }
+            ).unwrap();
+        }
+
+        #[inline]
+        pub fn window_id(&self) -> WindowId {
+            self.ui.window_id
         }
 
         pub fn open_window(

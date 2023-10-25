@@ -47,7 +47,6 @@ use crate::{
 use super::{WindowEvent, MouseEvent, MouseButton, MouseScrollDelta};
 
 pub(crate) struct LayerShellBase<W: LayerShellWindow> {
-    ui: Ui,
     event_loop: EventLoop<'static, State<W>>,
     queue_handle: QueueHandle<State<W>>,
     state: State<W>
@@ -65,6 +64,7 @@ pub(crate) trait LayerShellWindow {
 }
 
 struct State<W: LayerShellWindow> {
+    ui: Ui,
     window: W,
     registry_state: RegistryState,
     seat_state: SeatState,
@@ -135,7 +135,9 @@ impl<W: LayerShellWindow + 'static> LayerShellBase<W> {
         loop_handle.insert_source(client_recv, |event, _, state| {
             match event  {
                 channel::Event::Msg(request) =>  match request {
-                    ClientRequest::Close => state.close = true
+                    ClientRequest::Close => state.close = true,
+                    ClientRequest::ThemeChanged(theme) =>
+                        state.ui.set_theme(theme)
                 }
                 channel::Event::Closed => eprintln!("Client channel closed unexpectedly!")
             }
@@ -150,9 +152,9 @@ impl<W: LayerShellWindow + 'static> LayerShellBase<W> {
         }).expect("Couldn't register ui task source with Wayland event loop.");
 
         Self {
-            ui,
             event_loop,
             state: State {
+                ui,
                 window,
                 surface,
                 shm,
@@ -178,7 +180,7 @@ impl<W: LayerShellWindow + 'static> LayerShellBase<W> {
 
     pub fn run(mut self) {
         while !self.state.close {
-            if self.ui.needs_redraw() {
+            if self.state.ui.needs_redraw() {
                 self.draw();
             }
 
@@ -186,18 +188,18 @@ impl<W: LayerShellWindow + 'static> LayerShellBase<W> {
 
             for event in self.state.pending_events.drain(..) {
                 match event {
-                    UiEvent::Task(result) => self.ui.task_result(result),
+                    UiEvent::Task(result) => self.state.ui.task_result(result),
                     UiEvent::Window(event) => match event {
                         WindowEvent::ScaleFactor(scale_factor) =>
-                            self.ui.set_scale_factor(scale_factor),
+                            self.state.ui.set_scale_factor(scale_factor),
                         WindowEvent::Resize(size) => {
-                            self.ui.layout(Size {
+                            self.state.ui.layout(Size {
                                 width: size.0 as f32,
                                 height: size.1 as f32
                             });
                         }
                         WindowEvent::Mouse(event) =>
-                            self.ui.event(Event::Mouse(event))
+                            self.state.ui.event(Event::Mouse(event))
                     }
                 }
             }
@@ -255,7 +257,7 @@ impl<W: LayerShellWindow + 'static> LayerShellBase<W> {
             height
         ).unwrap();
 
-        self.ui.draw(&mut pixmap);
+        self.state.ui.draw(&mut pixmap);
 
         let surface = self.state.surface.wl_surface();
         surface.damage_buffer(0, 0, width as i32, height as i32);
