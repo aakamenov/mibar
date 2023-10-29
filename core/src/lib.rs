@@ -23,6 +23,6 @@ pub use cosmic_text::{Family, Stretch, Style, Weight};
 pub mod window {
     pub use super::client::WindowId;
     pub use super::wayland::Window;
-    pub use super::wayland::bar_window::*;
-    pub use super::wayland::panel::*;
+    pub use super::wayland::bar;
+    pub use super::wayland::side_panel;
 }

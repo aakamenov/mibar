@@ -13,7 +13,7 @@ use mibar::{
         flex::{Flex, FlexBuilder},
         Element, Padding, Alignment
     },
-    window::{BarWindow, Location},
+    window::bar::{Bar, Location},
     Theme, Font, Family, Color, QuadStyle, run
 };
 
@@ -39,10 +39,7 @@ fn main() {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
 
-    let window = BarWindow {
-        location: Location::Top,
-        size: 40
-    };
+    let window = Bar::new(40, Location::Top);
 
     run(builder, window, build(), theme(), |_| sys_info::init());
 }

@@ -13,7 +13,10 @@ use tokio::{
 };
 
 use crate::{
-    wayland::layer_shell_window::LayerShellBase,
+    wayland::{
+        wayland_window::WaylandWindowBase,
+        layer_shell_window::LayerShellWindowState,
+    },
     window::Window,
     widget::Element,
     Ui, Theme, TaskResult
@@ -90,16 +93,16 @@ pub fn run(
 
                         match window {
                             Window::Bar(bar) => {
-                                LayerShellBase::new(
-                                    bar,
+                                WaylandWindowBase::<LayerShellWindowState>::new(
+                                    bar.into(),
                                     ui,
                                     client_recv,
                                     task_recv
                                 ).run();
                             }
-                            Window::Panel(panel) => {
-                                LayerShellBase::new(
-                                    panel,
+                            Window::SidePanel(panel) => {
+                                WaylandWindowBase::<LayerShellWindowState>::new(
+                                    panel.into(),
                                     ui,
                                     client_recv,
                                     task_recv

@@ -1,15 +1,17 @@
+pub mod bar;
+pub mod side_panel;
+pub mod popup;
+pub(crate) mod wayland_window;
 pub(crate) mod layer_shell_window;
-pub(crate) mod bar_window;
-pub (crate) mod panel;
 
-use bar_window::BarWindow;
-use panel::Panel;
+use bar::Bar;
+use side_panel::SidePanel;
 
 use crate::{Point, Vector};
 
 pub enum Window {
-    Bar(BarWindow),
-    Panel(Panel)
+    Bar(Bar),
+    SidePanel(SidePanel)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -86,14 +88,14 @@ impl MouseScrollDelta {
     }
 }
 
-impl From<BarWindow> for Window {
-    fn from(window: BarWindow) -> Self {
+impl From<Bar> for Window {
+    fn from(window: Bar) -> Self {
         Self::Bar(window)
     }
 }
 
-impl From<Panel> for Window {
-    fn from(panel: Panel) -> Self {
-        Self::Panel(panel)
+impl From<SidePanel> for Window {
+    fn from(panel: SidePanel) -> Self {
+        Self::SidePanel(panel)
     }
 }
