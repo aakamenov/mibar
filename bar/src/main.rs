@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use mibar::{
     tokio,
     modules::{
@@ -66,7 +68,7 @@ fn build() -> impl Element {
         
         let right = Flex::row(|builder| {
             builder.add_non_flex(PulseAudioVolume::new(format_audio));
-            builder.add_non_flex(Battery::new(battery_style));
+            builder.add_non_flex(Battery::new("BAT0", Duration::from_secs(30), battery_style));
             builder.add_non_flex(Cpu::new());
             builder.add_non_flex(Ram::new());
         })

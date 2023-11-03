@@ -12,10 +12,6 @@ use tokio::{
 
 use crate::sys_info::battery;
 
-// TODO: Make these parameters
-const UPDATE_INTERVAL: Duration = Duration::from_secs(30);
-const DEVICE: &str = "BAT0";
-
 const BODY_SIZE: Size = Size::new(30f32, 16f32);
 const TERMINAL_SIZE: Size = Size::new(4f32, 9f32);
 const BODY_RADIUS: f32 = 2f32;
@@ -24,13 +20,15 @@ const TEXT_SIZE: f32 = 12f32;
 pub type StyleFn = fn(capacity: u8) -> Style;
 
 pub struct Battery {
-    style: StyleFn
+    style: StyleFn,
+    device: &'static str,
+    interval: Duration
 }
 
 pub struct BatteryWidget;
 
 pub struct State {
-    info: Option<BatteryInfo>,
+    info: BatteryInfoState,
     text_info: TextInfo,
     text_size: Size,
     style: StyleFn,
@@ -45,15 +43,19 @@ pub struct Style {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-struct BatteryInfo {
-    capacity: u8,
-    status: battery::Status
+enum BatteryInfoState {
+    InitialRead,
+    Info {
+        capacity: u8,
+        status: battery::Status
+    },
+    Error
 }
 
 impl Battery {
     #[inline]
-    pub fn new(style: StyleFn) -> Self {
-        Self { style }
+    pub fn new(device: &'static str, interval: Duration, style: StyleFn) -> Self {
+        Self { style, device, interval }
     }
 }
 
@@ -65,38 +67,38 @@ impl Element for Battery {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let handle = ctx.task_with_sender(|sender: ValueSender<Option<BatteryInfo>>| {
+        let handle = ctx.task_with_sender(|sender: ValueSender<BatteryInfoState>| {
             async move {
-                let mut interval = interval(UPDATE_INTERVAL);
+                let mut interval = interval(self.interval);
 
                 loop {
                     interval.tick().await;
 
                     let (capacity, status) = tokio::join! {
-                        battery::capacity(DEVICE),
-                        battery::status(DEVICE)
+                        battery::capacity(self.device),
+                        battery::status(self.device)
                     };
 
                     if let Err(err) = capacity {
                         eprintln!("Error reading battery capacity: {}", err);
-                        sender.send(None).await;
+                        sender.send(BatteryInfoState::Error).await;
 
                         continue;
                     }
 
                     if let Err(err) = status {
                         eprintln!("Error reading battery status: {}", err);
-                        sender.send(None).await;
+                        sender.send(BatteryInfoState::Error).await;
 
                         continue;
                     }
 
-                    let info = BatteryInfo {
+                    let info = BatteryInfoState::Info {
                         capacity: capacity.unwrap(),
                         status: status.unwrap()
                     };
 
-                    sender.send(Some(info)).await;
+                    sender.send(info).await;
                 }
             }
         });
@@ -105,7 +107,7 @@ impl Element for Battery {
         font.weight = Weight::BOLD;
 
         let state = State {
-            info: None,
+            info: BatteryInfoState::InitialRead,
             style: self.style,
             text_info: TextInfo::new("0", TEXT_SIZE)
                 .with_font(font),
@@ -122,7 +124,7 @@ impl Widget for BatteryWidget {
 
     fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, _bounds: SizeConstraints) -> Size {
         match state.info {
-            Some(_) => {
+            BatteryInfoState::Info { .. } | BatteryInfoState::Error => {
                 state.text_size = ctx.measure_text(&state.text_info, BODY_SIZE);
 
                 let mut size = BODY_SIZE;
@@ -130,7 +132,7 @@ impl Widget for BatteryWidget {
 
                 size
             },
-            None => Size::ZERO
+            BatteryInfoState::InitialRead => Size::ZERO
         }
     }
 
@@ -139,29 +141,43 @@ impl Widget for BatteryWidget {
         ctx: &mut UpdateCtx,
         data: Box<dyn std::any::Any>
     ) {
-        let info = *data.downcast::<Option<BatteryInfo>>().unwrap();
+        let info = *data.downcast::<BatteryInfoState>().unwrap();
 
-        if state.info != info {
-            if let Some(info) = info {
-                match info.status {
+        if state.info == info {
+            return;
+        }
+
+        match info {
+            BatteryInfoState::Info { capacity, status } => {
+                match status {
                     battery::Status::Charging =>
                         state.text_info.text = "󱐋".into(),
                     battery::Status::Full | battery::Status::Discharging =>
-                        state.text_info.text = info.capacity.to_string()
+                        state.text_info.text = capacity.to_string()
                 }
             }
-
-            state.info = info;
-            ctx.request_layout();
+            BatteryInfoState::Error => {
+                state.text_info.text = "N/A".into();
+            }
+            BatteryInfoState::InitialRead => unreachable!()
         }
+
+        state.info = info;
+        ctx.request_layout();
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        let Some(info) = state.info else {
+        if let BatteryInfoState::InitialRead = state.info {
             return;
         };
 
-        let style = (state.style)(info.capacity);
+        let capacity = if let BatteryInfoState::Info { capacity, .. } = state.info {
+            capacity
+        } else {
+            0
+        };
+
+        let style = (state.style)(capacity);
 
         let mut body = ctx.layout();
         body.set_size(BODY_SIZE);
@@ -184,7 +200,7 @@ impl Widget for BatteryWidget {
         );
 
         let mut fill = body.shrink(2f32);
-        fill.width = (fill.width * info.capacity as f32) / 100f32;
+        fill.width = (fill.width * capacity as f32) / 100f32;
 
         ctx.renderer.fill_quad(Quad::new(fill, style.background));
 
