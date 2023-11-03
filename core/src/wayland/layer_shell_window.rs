@@ -25,6 +25,7 @@ pub struct LayerShellWindowState {
     desired_size: (u32, u32)
 }
 
+#[derive(Debug)]
 pub struct LayerShellWindowConfig {
     pub anchor: Anchor,
     pub layer: Layer,
@@ -40,7 +41,7 @@ impl WaylandWindow for LayerShellWindowState {
         globals: &GlobalList,
         queue_handle: &QueueHandle<State<Self>>,
         surface: WlSurface
-    ) -> Self {
+    ) -> (Self, WindowSurface) {
         let layer_shell = LayerShell::bind(&globals, &queue_handle)
             .expect("Compositor does not support the zwlr_layer_shell_v1 protocol.");
 
@@ -56,20 +57,12 @@ impl WaylandWindow for LayerShellWindowState {
         surface.set_anchor(config.anchor);
         surface.commit();
 
-        LayerShellWindowState {
-            surface,
+        let state = LayerShellWindowState {
+            surface: surface.clone(),
             desired_size: config.desired_size
-        }
-    }
+        };
 
-    #[inline]
-    fn wl_surface(&self) -> &WlSurface {
-        self.surface.wl_surface()
-    }
-    
-    #[inline]
-    fn as_window_surface(&self) -> WindowSurface {
-        WindowSurface::LayerShellSurface(self.surface.clone())
+        (state, WindowSurface::LayerShellSurface(surface))
     }
 }
 
@@ -87,12 +80,10 @@ impl LayerShellHandler for State<LayerShellWindowState> {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        layer: &LayerSurface,
+        _layer: &LayerSurface,
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        assert_eq!(self.window.surface, *layer);
-
         let size = if configure.new_size.0 == 0 || configure.new_size.1 == 0 {
             self.window.desired_size
         } else {

@@ -14,13 +14,24 @@ use tokio::{
 
 use crate::{
     wayland::{
-        wayland_window::WaylandWindowBase,
+        wayland_window::{WaylandWindowBase, WindowSurface},
         layer_shell_window::LayerShellWindowState,
+        popup::PopupWindowState,
+        WindowConfig
     },
     window::Window,
     widget::Element,
     Ui, Theme, TaskResult
 };
+
+pub(crate) type MakeUiFn = 
+    Box<dyn FnOnce(
+        Theme,
+        WindowSurface,
+        runtime::Handle,
+        Sender<TaskResult>,
+        UnboundedSender<UiRequest>
+    ) -> Ui + Send>;
 
 #[derive(Clone, Copy, PartialOrd, Eq, PartialEq, Debug)]
 pub struct WindowId(u64);
@@ -32,12 +43,8 @@ pub(crate) struct UiRequest {
 
 pub(crate) enum WindowAction {
     Open {
-        window: Window,
-        create_ui: Box<dyn FnOnce(
-            runtime::Handle,
-            Sender<TaskResult>,
-            UnboundedSender<UiRequest>
-        ) -> Ui + Send>
+        config: WindowConfig,
+        make_ui: MakeUiFn
     },
     Close,
     ThemeChanged(Theme)
@@ -63,16 +70,19 @@ pub fn run(
     let (ui_send, mut ui_recv) = unbounded_channel::<UiRequest>();
 
     let id = WindowId::new();
-    let theme_clone = theme.clone();
-    let create_ui = Box::new(move |rt_handle, task_send, client_send| {
-        Ui::new(id, rt_handle, task_send, client_send, theme_clone, root)
+    let make_ui = Box::new(move |theme, surface, rt_handle, task_send, client_send| {
+        Ui::new(id, surface, rt_handle, task_send, client_send, theme, root)
     });
 
     ui_send.send(UiRequest {
         id,
         action: WindowAction::Open {
-            window: window.into(),
-            create_ui
+            config: match window.into() {
+                Window::Bar(bar) => WindowConfig::LayerShell(bar.into()),
+                Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
+                Window::Popup(_) => panic!("Initial window cannot be a popup.")
+            },
+            make_ui
         }
     }).unwrap();
 
@@ -81,31 +91,34 @@ pub fn run(
 
         while let Some(request) = ui_recv.recv().await {
             match request.action {
-                WindowAction::Open { window, create_ui } => {
+                WindowAction::Open { config, make_ui } => {
                     let (client_send, client_recv) = channel::<ClientRequest>();
                     windows.insert(request.id, client_send);
 
                     let rt_handle = runtime.handle().clone();
                     let ui_send = ui_send.clone();
-                    thread::spawn(move || {
-                        let (task_send, task_recv) = channel::<TaskResult>();
-                        let ui = create_ui(rt_handle, task_send, ui_send);
+                    let theme = theme.clone();
 
-                        match window {
-                            Window::Bar(bar) => {
+                    thread::spawn(move || {
+                        match config {
+                            WindowConfig::LayerShell(bar) => {
                                 WaylandWindowBase::<LayerShellWindowState>::new(
                                     bar.into(),
-                                    ui,
                                     client_recv,
-                                    task_recv
+                                    make_ui,
+                                    theme,
+                                    rt_handle,
+                                    ui_send
                                 ).run();
                             }
-                            Window::SidePanel(panel) => {
-                                WaylandWindowBase::<LayerShellWindowState>::new(
-                                    panel.into(),
-                                    ui,
+                            WindowConfig::Popup(popup) => {
+                                WaylandWindowBase::<PopupWindowState>::new(
+                                    popup,
                                     client_recv,
-                                    task_recv
+                                    make_ui,
+                                    theme,
+                                    rt_handle,
+                                    ui_send
                                 ).run();
                             }
                         }

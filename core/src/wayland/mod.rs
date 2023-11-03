@@ -6,12 +6,17 @@ pub(crate) mod layer_shell_window;
 
 use bar::Bar;
 use side_panel::SidePanel;
+use popup::{Popup, PopupWindowConfig};
+use layer_shell_window::LayerShellWindowConfig;
+use wayland_window::WindowSurface;
 
 use crate::{Point, Vector};
 
+#[derive(Debug)]
 pub enum Window {
     Bar(Bar),
-    SidePanel(SidePanel)
+    SidePanel(SidePanel),
+    Popup(Popup)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -64,6 +69,12 @@ pub(crate) enum WindowEvent {
     Mouse(MouseEvent)
 }
 
+#[derive(Debug)]
+pub(crate) enum WindowConfig {
+    LayerShell(LayerShellWindowConfig),
+    Popup(PopupWindowConfig)
+}
+
 impl MouseButton {
     #[inline]
     fn from_code(code: u32) -> Option<Self> {
@@ -88,6 +99,22 @@ impl MouseScrollDelta {
     }
 }
 
+impl Window {
+    #[inline]
+    pub(crate) fn into_config(self, surface: &WindowSurface) -> WindowConfig {
+        match self {
+            Window::Bar(bar) => WindowConfig::LayerShell(bar.into()),
+            Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
+            Window::Popup(popup) => WindowConfig::Popup(
+                PopupWindowConfig {
+                    parent: surface.clone(),
+                    size: popup.size
+                }
+            )
+        }
+    }
+}
+
 impl From<Bar> for Window {
     fn from(window: Bar) -> Self {
         Self::Bar(window)
@@ -97,5 +124,11 @@ impl From<Bar> for Window {
 impl From<SidePanel> for Window {
     fn from(panel: SidePanel) -> Self {
         Self::SidePanel(panel)
+    }
+}
+
+impl From<Popup> for Window {
+    fn from(popup: Popup) -> Self {
+        Self::Popup(popup)
     }
 }

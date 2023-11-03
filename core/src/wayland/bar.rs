@@ -10,6 +10,7 @@ pub enum Location {
     Right
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct Bar {
     pub location: Location,
     pub size: u32

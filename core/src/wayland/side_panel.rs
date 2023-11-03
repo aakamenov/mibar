@@ -10,6 +10,7 @@ pub enum Location {
     BottomRight
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct SidePanel {
     pub size: (u32, u32),
     pub location: Location

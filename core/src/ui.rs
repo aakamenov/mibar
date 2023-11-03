@@ -10,7 +10,13 @@ use std::{
 use tiny_skia::PixmapMut;
 use nohash::IntMap;
 use tokio::{runtime, task::JoinHandle, sync::mpsc::UnboundedSender};
-use smithay_client_toolkit::reexports::calloop::channel::Sender;
+use smithay_client_toolkit::{
+    shell::WaylandSurface,
+    reexports::{
+        client::protocol::wl_surface::WlSurface,
+        calloop::channel::Sender
+    }
+};
 
 use crate::{
     geometry::{Rect, Size, Point},
@@ -20,7 +26,7 @@ use crate::{
     theme::Theme,
     draw::TextInfo,
     renderer::Renderer,
-    wayland::{WindowEvent, MouseEvent},
+    wayland::{wayland_window::WindowSurface, WindowEvent, MouseEvent},
     client::{UiRequest, WindowId, WindowAction},
     window::Window
 };
@@ -109,6 +115,7 @@ pub(crate) struct UiCtx {
     rt_handle: runtime::Handle,
     task_send: Sender<TaskResult>,
     client_send: UnboundedSender<UiRequest>,
+    surface: WindowSurface,
     window_id: WindowId
 }
 
@@ -121,6 +128,7 @@ struct WidgetState {
 impl Ui {
     pub fn new<E: Element>(
         window_id: WindowId,
+        surface: WindowSurface,
         rt_handle: runtime::Handle,
         task_send: Sender<TaskResult>,
         client_send: UnboundedSender<UiRequest>,
@@ -129,7 +137,7 @@ impl Ui {
     ) -> Self {
         let mut ctx = UiCtx {
             theme,
-            mouse_pos: Point::ZERO,
+            mouse_pos: Point::new(-1f32, -1f32),
             widgets: IntMap::default(),
             // We start from 1 because we use 0 just below as a fake ID
             // in order to begin building the widget tree. Thus, the root
@@ -143,6 +151,7 @@ impl Ui {
             rt_handle,
             task_send,
             client_send,
+            surface,
             window_id
         };
 
@@ -158,6 +167,14 @@ impl Ui {
             ctx,
             size: Size::ZERO,
             renderer: Renderer::new()
+        }
+    }
+
+    #[inline]
+    pub fn wl_surface(&self) -> &WlSurface {
+        match &self.ctx.surface {
+            WindowSurface::LayerShellSurface(surface) => surface.wl_surface(),
+            WindowSurface::XdgPopup(popup) => popup.wl_surface()
         }
     }
 
@@ -530,7 +547,7 @@ You can ignore the return value otherwise."]
 value produced by the async computation. You MUST implement
 [`Widget::task_result`] if you are using this method in your widget. If you
 don't, the default implementation is a panic which will remind you of that."]
-#[must_use = r"It is your responsibility to abort long running or infinite loop
+        #[must_use = r"It is your responsibility to abort long running or infinite loop
 tasks if you don't need them anymore using the handle returned by this method.
 You can ignore the return value otherwise."]
         pub fn task<T: Send + 'static>(
@@ -556,7 +573,7 @@ You can ignore the return value otherwise."]
 with the value sent by the `ValueSender`. You MUST implement
 [`Widget::task_result`] if you are using this method in your widget. If you
 don't, the default implementation is a panic which will remind you of that."]
-#[must_use = r"It is your responsibility to abort long running or infinite loop
+        #[must_use = r"It is your responsibility to abort long running or infinite loop
 tasks if you don't need them anymore using the handle returned by this method.
 You can ignore the return value otherwise."]
         pub fn task_with_sender<T: Send + 'static, Fut>(
@@ -596,17 +613,15 @@ You can ignore the return value otherwise."]
             root: impl Element + Send + 'static
         ) -> WindowId {
             let id = WindowId::new();
-
-            let theme = self.ui.theme.clone();
-            let create_ui = Box::new(move |rt_handle, task_send, client_send| {
-                Ui::new(id, rt_handle, task_send, client_send, theme, root)
+            let make_ui = Box::new(move |theme, surface, rt_handle, task_send, client_send| {
+                Ui::new(id, surface, rt_handle, task_send, client_send, theme, root)
             });
 
             self.ui.client_send.send(UiRequest {
                 id,
                 action: WindowAction::Open {
-                    window: window.into(),
-                    create_ui
+                    config: window.into().into_config(&self.ui.surface),
+                    make_ui
                 }
             }).unwrap();
 

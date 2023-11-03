@@ -1,9 +1,8 @@
 use smithay_client_toolkit::{
     reexports::{
-        protocols::xdg::shell::client::xdg_surface::XdgSurface,
         calloop_wayland_source::WaylandSource,
         calloop::{
-            channel::{self, Channel},
+            channel::{self as calloop_channel, channel, Channel},
             EventLoop
         },
         client::{
@@ -18,7 +17,7 @@ use smithay_client_toolkit::{
             Connection, QueueHandle
         }
     },
-    shell::wlr_layer::LayerSurface,
+    shell::{wlr_layer::LayerSurface, xdg::popup::Popup},
     compositor::{CompositorHandler, CompositorState},
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
@@ -34,10 +33,11 @@ use smithay_client_toolkit::{
     delegate_shm, registry_handlers, delegate_pointer
 };
 use tiny_skia::PixmapMut;
+use tokio::{runtime, sync::mpsc::UnboundedSender};
 
 use crate::{
-    client::ClientRequest,
-    Ui, UiEvent, Event, TaskResult, Point, Size
+    client::{ClientRequest, MakeUiFn, UiRequest},
+    Ui, UiEvent, Event, TaskResult, Point, Size, Theme
 };
 use super::{WindowEvent, MouseEvent, MouseButton, MouseScrollDelta};
 
@@ -55,16 +55,13 @@ pub(crate) trait WaylandWindow: Sized {
         globals: &GlobalList,
         queue_handle: &QueueHandle<State<Self>>,
         surface: WlSurface
-    ) -> Self;
-
-    fn wl_surface(&self) -> &WlSurface;
-    fn as_window_surface(&self) -> WindowSurface;
+    ) -> (Self, WindowSurface);
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum WindowSurface {
     LayerShellSurface(LayerSurface),
-    XdgShellSurface(XdgSurface)
+    XdgPopup(Popup)
 }
 
 pub(crate) struct State<W: WaylandWindow> {
@@ -97,9 +94,11 @@ pub(crate) struct Viewport {
 impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
     pub fn new(
         config: W::Config,
-        ui: Ui,
         client_recv: Channel<ClientRequest>,
-        task_recv: Channel<TaskResult>
+        make_ui: MakeUiFn,
+        theme: Theme,
+        rt_handle: runtime::Handle,
+        ui_send: UnboundedSender<UiRequest>
     ) -> Self {
         let conn = Connection::connect_to_env().unwrap();
         let (globals, event_queue) = registry_queue_init(&conn).unwrap();
@@ -122,30 +121,32 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
 
         loop_handle.insert_source(client_recv, |event, _, state| {
             match event  {
-                channel::Event::Msg(request) =>  match request {
+                calloop_channel::Event::Msg(request) =>  match request {
                     ClientRequest::Close => state.close = true,
                     ClientRequest::ThemeChanged(theme) =>
                         state.ui.set_theme(theme)
                 }
-                channel::Event::Closed => eprintln!("Client channel closed unexpectedly!")
+                calloop_channel::Event::Closed => eprintln!("Client channel closed unexpectedly!")
             }
         }).expect("Couldn't register client request source with Wayland event loop.");
 
+        let (task_send, task_recv) = channel::<TaskResult>();
         loop_handle.insert_source(task_recv, |event, _, state| {
             match event  {
-                channel::Event::Msg(result) =>
+                calloop_channel::Event::Msg(result) =>
                     state.pending_events.push(UiEvent::Task(result)),
-                channel::Event::Closed => eprintln!("Task channel closed unexpectedly!")
+                calloop_channel::Event::Closed => eprintln!("Task channel closed unexpectedly!")
             }
         }).expect("Couldn't register ui task source with Wayland event loop.");
 
         let surface = compositor_state.create_surface(&queue_handle);
+        let (window, surface) = W::init(config, &globals, &queue_handle, surface);
 
         Self {
             event_loop,
             state: State {
-                ui,
-                window: W::init(config, &globals, &queue_handle, surface),
+                ui: make_ui(theme, surface, rt_handle, task_send, ui_send),
+                window,
                 shm,
                 pool,
                 buffer: None,
@@ -248,7 +249,7 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
 
         self.state.ui.draw(&mut pixmap);
 
-        let surface = self.state.window.wl_surface();
+        let surface = self.state.ui.wl_surface();
         surface.damage_buffer(0, 0, width as i32, height as i32);
         surface.frame(&self.queue_handle, surface.clone());
         buffer.attach_to(surface).expect("buffer attach");
@@ -262,11 +263,9 @@ impl<W: WaylandWindow> CompositorHandler for State<W> {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        surface: &WlSurface,
+        _surface: &WlSurface,
         new_factor: i32,
     ) {
-        assert_eq!(self.window.wl_surface(), surface);
-
         let new_factor = new_factor as f32;
         let viewport = &mut self.monitor.viewport;
         
@@ -276,7 +275,7 @@ impl<W: WaylandWindow> CompositorHandler for State<W> {
         viewport.scale_factor = new_factor;
 
         self.buffer = None;
-        self.window.wl_surface().set_buffer_scale(new_factor as i32);
+        self.ui.wl_surface().set_buffer_scale(new_factor as i32);
 
         self.pending_events.push(
             UiEvent::Window(WindowEvent::ScaleFactor(new_factor))

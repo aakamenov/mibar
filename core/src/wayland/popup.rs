@@ -1,30 +1,51 @@
 use smithay_client_toolkit::{
-    reexports::client::{
-        globals::GlobalList,
-        protocol::wl_surface::WlSurface,
-        Connection, QueueHandle
+    reexports::{
+        protocols::xdg::shell::client::xdg_positioner::Anchor,
+        client::{
+            globals::GlobalList,
+            protocol::wl_surface::WlSurface,
+            Connection, QueueHandle
+        }
     },
     shell::{
         xdg::{
-            window::{WindowHandler, Window as XdgWindow},
-            popup::{Popup, PopupConfigure, PopupHandler},
+            window::{Window as XdgWindow, WindowConfigure, WindowHandler},
+            popup::{Popup as SctkPopup, PopupHandler, PopupConfigure, ConfigureKind},
             XdgShell, XdgPositioner
         },
     },
     delegate_xdg_shell, delegate_xdg_popup, delegate_xdg_window
 };
 
-use super::wayland_window::{State, WaylandWindow, WindowSurface};
+use super::{
+    wayland_window::{State, WaylandWindow, WindowSurface},
+    WindowEvent
+};
+use crate::ui::UiEvent;
 
-pub(crate) struct PopupWindow {
-    popup: Popup
+#[derive(Clone, Copy, Debug)]
+pub struct Popup {
+    pub size: (u32, u32)
 }
 
+pub(crate) struct PopupWindowState {
+    popup: SctkPopup,
+}
+
+#[derive(Debug)]
 pub(crate) struct PopupWindowConfig {
-    parent: WindowSurface
+    pub parent: WindowSurface,
+    pub size: (u32, u32)
 }
 
-impl WaylandWindow for PopupWindow {
+impl Popup {
+    #[inline]
+    pub fn new(size: (u32, u32)) -> Self {
+        Self { size }
+    }
+}
+
+impl WaylandWindow for PopupWindowState {
     type Config = PopupWindowConfig;
 
     fn init(
@@ -32,22 +53,18 @@ impl WaylandWindow for PopupWindow {
         globals: &GlobalList,
         queue_handle: &QueueHandle<State<Self>>,
         surface: WlSurface
-    ) -> Self {
+    ) -> (Self, WindowSurface) {
         let shell = XdgShell::bind(globals, queue_handle)
             .expect("xdg shell is not available");
 
         let positioner = XdgPositioner::new(&shell).unwrap();
-        let popup = Popup::from_surface(
-            None,
-            &positioner,
-            queue_handle,
-            surface.clone(),
-            &shell
-        ).unwrap();
+        positioner.set_size(config.size.0 as i32, config.size.1 as i32);
+        positioner.set_offset(0, 0);
+        positioner.set_anchor(Anchor::BottomLeft);
 
         let popup = match config.parent {
             WindowSurface::LayerShellSurface(parent) => {
-                let popup = Popup::from_surface(
+                let popup = SctkPopup::from_surface(
                     None,
                     &positioner,
                     queue_handle,
@@ -59,9 +76,9 @@ impl WaylandWindow for PopupWindow {
 
                 popup
             }
-            WindowSurface::XdgShellSurface(parent) =>
-                Popup::from_surface(
-                    Some(&parent),
+            WindowSurface::XdgPopup(parent) =>
+                SctkPopup::from_surface(
+                    Some(parent.xdg_shell_surface().xdg_surface()),
                     &positioner,
                     queue_handle,
                     surface,
@@ -69,63 +86,63 @@ impl WaylandWindow for PopupWindow {
                 ).unwrap()
         };
 
-        Self { popup }
-    }
+        popup.wl_surface().commit();
 
-    #[inline]
-    fn wl_surface(&self) -> &WlSurface {
-        self.popup.wl_surface()
-    }
+        let popup_clone = popup.clone();
 
-    #[inline]
-    fn as_window_surface(&self) -> WindowSurface {
-        WindowSurface::XdgShellSurface(self.popup.xdg_surface().clone())
+        (Self { popup }, WindowSurface::XdgPopup(popup_clone))
     }
 }
 
-impl WindowHandler for State<PopupWindow> {
+impl WindowHandler for State<PopupWindowState> {
     fn request_close(
         &mut self,
-        conn: &Connection,
-        qh: &QueueHandle<Self>,
-        window: &XdgWindow
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _window: &XdgWindow
     ) {
-        todo!()
+        println!("xdg window close requested");
     }
 
     fn configure(
         &mut self,
-        conn: &Connection,
-        qh: &QueueHandle<Self>,
-        window: &smithay_client_toolkit::shell::xdg::window::Window,
-        configure: smithay_client_toolkit::shell::xdg::window::WindowConfigure,
-        serial: u32,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _window: &XdgWindow,
+        configure: WindowConfigure,
+        _serial: u32
     ) {
-        todo!()
+        println!("xdg window configure {:?}", configure);
     }
 }
 
-impl PopupHandler for State<PopupWindow> {
+impl PopupHandler for State<PopupWindowState> {
     fn configure(
         &mut self,
-        conn: &Connection,
-        qh: &QueueHandle<Self>,
-        popup: &Popup,
-        config: PopupConfigure,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _popup: &SctkPopup,
+        config: PopupConfigure
     ) {
-        todo!()
+        if !matches!(config.kind, ConfigureKind::Initial) {
+            return;
+        }
+
+        let size = (config.width as u32, config.height as u32);
+        self.pending_events.push(UiEvent::Window(WindowEvent::Resize(size)));
     }
 
     fn done(
         &mut self,
-        conn: &Connection,
-        qh: &QueueHandle<Self>,
-        popup: &Popup
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _popup: &SctkPopup
     ) {
-        todo!()
+        println!("closing popup");
+        self.close = true;
     }
 }
 
-delegate_xdg_shell!(State<PopupWindow>);
-delegate_xdg_window!(State<PopupWindow>);
-delegate_xdg_popup!(State<PopupWindow>);
+delegate_xdg_shell!(State<PopupWindowState>);
+delegate_xdg_window!(State<PopupWindowState>);
+delegate_xdg_popup!(State<PopupWindowState>);

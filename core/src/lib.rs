@@ -25,4 +25,5 @@ pub mod window {
     pub use super::wayland::Window;
     pub use super::wayland::bar;
     pub use super::wayland::side_panel;
+    pub use super::wayland::popup;
 }
