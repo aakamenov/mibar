@@ -46,7 +46,7 @@ pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
             workspaces
         };
         
-        sender.send(event).await;
+        sender.send(event);
     }
 
     loop {
@@ -90,7 +90,7 @@ pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
                             workspaces
                         };
 
-                        sender.send(event).await;
+                        sender.send(event);
                     }
                 }
 
@@ -106,7 +106,7 @@ pub async fn start_listener_loop(sender: ValueSender<WorkspacesChanged>) {
                         workspaces
                     };
 
-                    sender.send(event).await;
+                    sender.send(event);
                     updated_workspaces = true;
                 }
             }   

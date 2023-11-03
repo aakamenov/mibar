@@ -9,9 +9,13 @@ use std::{
 
 use tiny_skia::PixmapMut;
 use nohash::IntMap;
-use tokio::{
-    sync::mpsc::Sender,
-    task::JoinHandle
+use tokio::{runtime, task::JoinHandle, sync::mpsc::UnboundedSender};
+use smithay_client_toolkit::{
+    shell::WaylandSurface,
+    reexports::{
+        client::protocol::wl_surface::WlSurface,
+        calloop::channel::Sender
+    }
 };
 
 use crate::{
@@ -22,17 +26,12 @@ use crate::{
     theme::Theme,
     draw::TextInfo,
     renderer::Renderer,
-    wayland::MouseEvent
+    wayland::{wayland_window::WindowSurface, WindowEvent, MouseEvent},
+    client::{UiRequest, WindowId, WindowAction},
+    window::Window
 };
 
 type WidgetId = u64;
-
-pub struct Ui {
-    ctx: UiCtx,
-    root: Id,
-    size: Size,
-    renderer: Renderer
-}
 
 pub struct TaskResult {
     id: WidgetId,
@@ -53,23 +52,11 @@ pub struct TypedId<E: Element> {
         &mut UpdateCtx,
         E::Message
     ),
-    data: std::marker::PhantomData<E>
+    data: PhantomData<E>
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub struct Id(WidgetId);
-
-pub struct UiCtx {
-    pub theme: Theme,
-    mouse_pos: Point,
-    widgets: IntMap<WidgetId, WidgetState>,
-    id_counter: u64,
-    needs_redraw: bool,
-    needs_layout: bool,
-    parent_to_children: IntMap<WidgetId, Vec<WidgetId>>,
-    child_to_parent: IntMap<WidgetId, WidgetId>,
-    task_sender: Sender<TaskResult>
-}
 
 pub struct LayoutCtx<'a> {
     renderer: &'a mut Renderer,
@@ -97,6 +84,41 @@ pub enum Event {
     Mouse(MouseEvent)
 }
 
+#[derive(Debug)]
+pub(crate) enum UiEvent {
+    Window(WindowEvent),
+    Task(TaskResult)
+}
+
+pub(crate) struct Ui {
+    ctx: UiCtx,
+    root: Id,
+    size: Size,
+    renderer: Renderer
+}
+
+pub(crate) struct UiCtx {
+    // Each Ui keeps a local copy of the current Theme. Whenever the theme
+    // is mutated, the Ui sends a request to the client which then propagates
+    // the changes to all the other windows. This may be more expensive than
+    // using a mutex but changing the theme in practice happens rarely (if ever)
+    // as opposed to synchronizing access every time we want to read it which
+    // occurs multiple times per UI re-draw.
+    theme: Theme,
+    mouse_pos: Point,
+    widgets: IntMap<WidgetId, WidgetState>,
+    id_counter: u64,
+    needs_redraw: bool,
+    needs_layout: bool,
+    parent_to_children: IntMap<WidgetId, Vec<WidgetId>>,
+    child_to_parent: IntMap<WidgetId, WidgetId>,
+    rt_handle: runtime::Handle,
+    task_send: Sender<TaskResult>,
+    client_send: UnboundedSender<UiRequest>,
+    surface: WindowSurface,
+    window_id: WindowId
+}
+
 struct WidgetState {
     widget: Box<dyn AnyWidget>,
     state: Box<dyn Any>,
@@ -105,13 +127,17 @@ struct WidgetState {
 
 impl Ui {
     pub fn new<E: Element>(
-        task_sender: Sender<TaskResult>,
+        window_id: WindowId,
+        surface: WindowSurface,
+        rt_handle: runtime::Handle,
+        task_send: Sender<TaskResult>,
+        client_send: UnboundedSender<UiRequest>,
         theme: Theme,
-        build: impl FnOnce() -> E
+        root: E
     ) -> Self {
         let mut ctx = UiCtx {
             theme,
-            mouse_pos: Point::ZERO,
+            mouse_pos: Point::new(-1f32, -1f32),
             widgets: IntMap::default(),
             // We start from 1 because we use 0 just below as a fake ID
             // in order to begin building the widget tree. Thus, the root
@@ -122,7 +148,11 @@ impl Ui {
             needs_layout: false,
             parent_to_children: IntMap::default(),
             child_to_parent: IntMap::default(),
-            task_sender
+            rt_handle,
+            task_send,
+            client_send,
+            surface,
+            window_id
         };
 
         let mut init_ctx = InitCtx {
@@ -130,7 +160,7 @@ impl Ui {
             ui: &mut ctx
         };
 
-        let root = init_ctx.new_child(build());
+        let root = init_ctx.new_child(root);
 
         Self {
             root: root.into(),
@@ -138,6 +168,19 @@ impl Ui {
             size: Size::ZERO,
             renderer: Renderer::new()
         }
+    }
+
+    #[inline]
+    pub fn wl_surface(&self) -> &WlSurface {
+        match &self.ctx.surface {
+            WindowSurface::LayerShellSurface(surface) => surface.wl_surface(),
+            WindowSurface::XdgPopup(popup) => popup.wl_surface()
+        }
+    }
+
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.ctx.theme = theme;
+        self.ctx.needs_redraw = true;
     }
 
     pub fn layout(&mut self, size: Size) {
@@ -224,8 +267,8 @@ impl Ui {
         ctx.layout(&self.root, SizeConstraints::tight(self.size));
 
         // Translate all widget positions from parent local space
-        // to window space. This feels like a giant hack but enables
-        // granular updates as otherwise the only way to translate
+        // to window space. This feels like a giant hack but enables us to have
+        // a separate draw step as otherwise the only way to translate
         // to window space during draw would be to walk the widget
         // tree for EACH widget that is to be redrawn/updated. So we do this
         // only once here instead.
@@ -496,7 +539,7 @@ You can ignore the return value otherwise."]
             &self,
             task: impl Future<Output = ()> + Send + 'static
         ) -> JoinHandle<()> {
-            tokio::spawn(task)
+            self.ui.rt_handle.spawn(task)
         }
 
         #[doc = r"A task that produces a single value and when complete calls
@@ -504,23 +547,24 @@ You can ignore the return value otherwise."]
 value produced by the async computation. You MUST implement
 [`Widget::task_result`] if you are using this method in your widget. If you
 don't, the default implementation is a panic which will remind you of that."]
-#[must_use = r"It is your responsibility to abort long running or infinite loop
+        #[must_use = r"It is your responsibility to abort long running or infinite loop
 tasks if you don't need them anymore using the handle returned by this method.
 You can ignore the return value otherwise."]
         pub fn task<T: Send + 'static>(
             &self,
             task: impl Future<Output = T> + Send + 'static
         ) -> JoinHandle<()> {
-            let tx = self.ui.task_sender.clone();
+            let tx = self.ui.task_send.clone();
             let id = self.current;
     
-            tokio::spawn(async move {
+            self.ui.rt_handle.spawn(async move {
                 let result = task.await;
-                
-                tx.send(TaskResult {
+                let result = TaskResult {
                     id,
                     data: Box::new(result)
-                }).await.unwrap();
+                };
+
+                tx.send(result).unwrap();
             })
         }
     
@@ -529,7 +573,7 @@ You can ignore the return value otherwise."]
 with the value sent by the `ValueSender`. You MUST implement
 [`Widget::task_result`] if you are using this method in your widget. If you
 don't, the default implementation is a panic which will remind you of that."]
-#[must_use = r"It is your responsibility to abort long running or infinite loop
+        #[must_use = r"It is your responsibility to abort long running or infinite loop
 tasks if you don't need them anymore using the handle returned by this method.
 You can ignore the return value otherwise."]
         pub fn task_with_sender<T: Send + 'static, Fut>(
@@ -540,10 +584,54 @@ You can ignore the return value otherwise."]
         {
             let sender = ValueSender::new(
                 self.current,
-                self.ui.task_sender.clone()
+                self.ui.task_send.clone()
             );
     
-            tokio::spawn(create_future(sender))
+            self.ui.rt_handle.spawn(create_future(sender))
+        }
+
+        pub fn theme_mut(&mut self, change: impl FnOnce(&mut Theme)) {
+            change(&mut self.ui.theme);
+            self.ui.needs_redraw = true;
+
+            self.ui.client_send.send(
+                UiRequest {
+                    id: self.ui.window_id,
+                    action: WindowAction::ThemeChanged(self.ui.theme.clone())
+                }
+            ).unwrap();
+        }
+
+        #[inline]
+        pub fn window_id(&self) -> WindowId {
+            self.ui.window_id
+        }
+
+        pub fn open_window(
+            &self,
+            window: impl Into<Window>,
+            root: impl Element + Send + 'static
+        ) -> WindowId {
+            let id = WindowId::new();
+            let make_ui = Box::new(move |theme, surface, rt_handle, task_send, client_send| {
+                Ui::new(id, surface, rt_handle, task_send, client_send, theme, root)
+            });
+
+            self.ui.client_send.send(UiRequest {
+                id,
+                action: WindowAction::Open {
+                    config: window.into().into_config(&self.ui.surface),
+                    make_ui
+                }
+            }).unwrap();
+
+            id
+        }
+
+        pub fn close_window(&self, id: WindowId) {
+            self.ui.client_send.send(
+                UiRequest { id, action: WindowAction::Close }
+            ).unwrap();
         }
     }
 }
@@ -587,13 +675,13 @@ impl<T: Send + 'static> ValueSender<T> {
         }
     }
 
-    pub async fn send(&self, value: T) {
+    pub fn send(&self, value: T) {
         let result = TaskResult {
             id: self.id,
             data: Box::new(value)
         };
 
-        self.sender.send(result).await.unwrap()
+        self.sender.send(result).unwrap()
     }
 }
 
