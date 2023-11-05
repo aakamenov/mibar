@@ -286,8 +286,9 @@ impl Widget for FlexWidget {
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
         if let Some(style) = state.style {
-            ctx.renderer.fill_quad(Quad {
-                rect: ctx.layout(),
+            let rect = ctx.layout();
+            ctx.renderer().fill_quad(Quad {
+                rect,
                 style: style()
             });
         }

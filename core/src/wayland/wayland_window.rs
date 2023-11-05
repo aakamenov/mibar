@@ -196,7 +196,7 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
         }
     }
 
-    pub fn draw(&mut self) {
+    fn draw(&mut self) {
         if self.state.monitor.output.is_none() {
             return;
         }

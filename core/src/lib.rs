@@ -8,9 +8,11 @@ mod color;
 mod draw;
 mod gradient;
 mod client;
+mod asset_loader;
 
 pub use client::run;
 pub use ui::*;
+pub use renderer::Renderer;
 pub use geometry::*;
 pub use theme::*;
 pub use wayland::{MouseEvent, MouseButton, MouseScrollDelta};

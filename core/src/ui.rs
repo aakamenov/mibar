@@ -28,7 +28,8 @@ use crate::{
     renderer::Renderer,
     wayland::{wayland_window::WindowSurface, WindowEvent, MouseEvent},
     client::{UiRequest, WindowId, WindowAction},
-    window::Window
+    window::Window,
+    asset_loader::{self, AssetSource}
 };
 
 type WidgetId = u64;
@@ -59,12 +60,10 @@ pub struct TypedId<E: Element> {
 pub struct Id(WidgetId);
 
 pub struct LayoutCtx<'a> {
-    renderer: &'a mut Renderer,
     ui: &'a mut UiCtx
 }
 
 pub struct DrawCtx<'a> {
-    pub renderer: &'a mut Renderer,
     ui: &'a mut UiCtx,
     layout: Rect
 }
@@ -75,7 +74,7 @@ pub struct UpdateCtx<'a> {
 }
 
 pub struct InitCtx<'a> {
-    ui: &'a mut UiCtx,
+    pub(crate) ui: &'a mut UiCtx,
     current: WidgetId
 }
 
@@ -93,11 +92,11 @@ pub(crate) enum UiEvent {
 pub(crate) struct Ui {
     ctx: UiCtx,
     root: Id,
-    size: Size,
-    renderer: Renderer
+    size: Size
 }
 
 pub(crate) struct UiCtx {
+    pub(crate) renderer: Renderer,
     // Each Ui keeps a local copy of the current Theme. Whenever the theme
     // is mutated, the Ui sends a request to the client which then propagates
     // the changes to all the other windows. This may be more expensive than
@@ -136,6 +135,7 @@ impl Ui {
         root: E
     ) -> Self {
         let mut ctx = UiCtx {
+            renderer: Renderer::new(),
             theme,
             mouse_pos: Point::new(-1f32, -1f32),
             widgets: IntMap::default(),
@@ -165,8 +165,7 @@ impl Ui {
         Self {
             root: root.into(),
             ctx,
-            size: Size::ZERO,
-            renderer: Renderer::new()
+            size: Size::ZERO
         }
     }
 
@@ -233,8 +232,7 @@ impl Ui {
 
         let mut ctx = DrawCtx {
             ui: &mut self.ctx,
-            layout: Rect::default(),
-            renderer: &mut self.renderer
+            layout: Rect::default()
         };
 
         ctx.draw(&self.root);
@@ -242,7 +240,7 @@ impl Ui {
         self.ctx.needs_redraw = false;
         self.ctx.needs_layout = false;
 
-        self.renderer.render(pixmap);
+        self.ctx.renderer.render(pixmap);
     }
 
     #[inline]
@@ -252,15 +250,14 @@ impl Ui {
 
     #[inline]
     pub fn set_scale_factor(&mut self, scale_factor: f32) {
-        if self.renderer.scale_factor() != scale_factor {
-            self.renderer.set_scale_factor(scale_factor);
+        if self.ctx.renderer.scale_factor() != scale_factor {
+            self.ctx.renderer.set_scale_factor(scale_factor);
             self.ctx.needs_redraw = true;
         }
     }
 
     fn layout_impl(&mut self) {
         let mut ctx = LayoutCtx {
-            renderer: &mut self.renderer,
             ui: &mut self.ctx
         };
 
@@ -360,7 +357,7 @@ impl<'a> LayoutCtx<'a> {
 
     #[inline]
     pub fn measure_text(&mut self, info: &TextInfo, size: Size) -> Size {
-        self.renderer.text_renderer.measure(info, size)
+        self.ui.renderer.text_renderer.measure(info, size)
     }
 
     #[inline]
@@ -455,6 +452,11 @@ impl<'a> UpdateCtx<'a> {
 }
 
 impl<'a> DrawCtx<'a> {
+    #[inline(always)]
+    pub fn renderer(&mut self) -> &mut Renderer {
+        &mut self.ui.renderer
+    }
+
     #[inline]
     pub fn draw(&mut self, id: impl Borrow<Id>) {
         let state = self.ui.widgets.get_mut(&id.borrow().0)
@@ -632,6 +634,20 @@ You can ignore the return value otherwise."]
             self.ui.client_send.send(
                 UiRequest { id, action: WindowAction::Close }
             ).unwrap();
+        }
+
+        pub(crate) fn load_asset(&self, source: impl Into<AssetSource>) {
+            let sender = ValueSender::new(
+                self.current,
+                self.ui.task_send.clone()
+            );
+
+            let job = asset_loader::Job {
+                sender,
+                source: source.into()
+            };
+
+            asset_loader::load(job);
         }
     }
 }

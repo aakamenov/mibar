@@ -1,6 +1,7 @@
 pub mod flex;
 pub mod text;
 pub mod button;
+pub mod image;
 mod layout;
 
 pub use layout::*; 

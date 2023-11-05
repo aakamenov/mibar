@@ -236,7 +236,9 @@ impl<E: Element + 'static> Widget for ButtonWidget<E> {
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
         let style = state.style.unwrap_or(ctx.theme().button);
         let style = style(state.current_state());
-        ctx.renderer.fill_quad(Quad { rect: ctx.layout(), style });
+
+        let rect = ctx.layout();
+        ctx.renderer().fill_quad(Quad { rect, style });
 
         ctx.draw(&state.child);
     }

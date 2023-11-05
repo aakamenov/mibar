@@ -122,8 +122,8 @@ impl Element for Battery {
 impl Widget for BatteryWidget {
     type State = State;
 
-    fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, _bounds: SizeConstraints) -> Size {
-        match state.info {
+    fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+        let size = match state.info {
             BatteryInfoState::Info { .. } | BatteryInfoState::Error => {
                 state.text_size = ctx.measure_text(&state.text_info, BODY_SIZE);
 
@@ -133,7 +133,9 @@ impl Widget for BatteryWidget {
                 size
             },
             BatteryInfoState::InitialRead => Size::ZERO
-        }
+        };
+
+        bounds.constrain(size)
     }
 
     fn task_result(
@@ -182,7 +184,7 @@ impl Widget for BatteryWidget {
         let mut body = ctx.layout();
         body.set_size(BODY_SIZE);
 
-        ctx.renderer.fill_quad(
+        ctx.renderer().fill_quad(
             Quad::rounded(body, Color::TRANSPARENT, BODY_RADIUS)
                 .with_border(2f32, style.body)
         );
@@ -195,20 +197,20 @@ impl Widget for BatteryWidget {
             TERMINAL_SIZE.height
         );
 
-        ctx.renderer.fill_quad(
+        ctx.renderer().fill_quad(
             Quad::rounded(terminal, style.body, BODY_RADIUS)
         );
 
         let mut fill = body.shrink(2f32);
         fill.width = (fill.width * capacity as f32) / 100f32;
 
-        ctx.renderer.fill_quad(Quad::new(fill, style.background));
+        ctx.renderer().fill_quad(Quad::new(fill, style.background));
 
         let mut text_rect = Rect::from_size(state.text_size);
         text_rect.x = body_center.x - (text_rect.width / 2f32);
         text_rect.y = body_center.y - (text_rect.height / 2f32);
 
-        ctx.renderer.fill_text(
+        ctx.renderer().fill_text(
             &state.text_info,
             text_rect,
             style.text

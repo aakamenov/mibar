@@ -123,6 +123,7 @@ impl Widget for TextWidget {
         let style = state.style.unwrap_or(ctx.theme().text);
         let color = (style)();
         
-        ctx.renderer.fill_text(&state.info, ctx.layout(), color);
+        let rect = ctx.layout();
+        ctx.renderer().fill_text(&state.info, rect, color);
     }
 }

@@ -192,7 +192,7 @@ impl Widget for ButtonWidget {
             layout.width / 2f32
         };
 
-        ctx.renderer.fill_circle(
+        ctx.renderer().fill_circle(
             Circle::new(
                 center,
                 radius,
@@ -208,7 +208,7 @@ impl Widget for ButtonWidget {
             rect.x = center.x - (rect.width / 2f32);
             rect.y = center.y - (rect.height / 2f32);
     
-            ctx.renderer.fill_text(
+            ctx.renderer().fill_text(
                 &state.text_info,
                 rect,
                 if state.status.is_current {
