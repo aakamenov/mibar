@@ -1,22 +1,62 @@
-use std::io::SeekFrom;
+use std::{io::SeekFrom, pin::Pin, future::Future};
+
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
     fs::File,
-    time::Interval
+    sync::watch::Sender
 };
 
-use super::{RAM, RamUsage};
+use crate::system_monitor::Listener;
+use super::create_interval;
 
-pub async fn poll(mut interval: Interval) {
+const POLL_INTERVAL: u64 = 800;
+
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub struct RamUsage {
+    pub total: u64,
+    pub available: u64
+}
+
+pub struct RamListener;
+
+impl RamUsage {
+    #[inline]
+    pub fn used(&self) -> u64 {
+        self.total - self.available
+    }
+
+    #[inline]
+    pub fn used_percentage(&self) -> f64 {
+        (self.used() as f64 / self.total as f64) * 100f64
+    }
+}
+
+impl Listener for RamListener {
+    type Value = RamUsage;
+
+    fn initial_value() -> Self::Value {
+        RamUsage::default()
+    }
+
+    fn run(tx: Sender<Self::Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(poll(tx))
+    }
+}
+
+async fn poll(tx: Sender<RamUsage>) {
     let mut file = match File::open("/proc/meminfo").await {
         Ok(file) => file,
         Err(err) => {
             eprintln!("Error retrieving RAM info: {err}");
+
             return;
         }
     };
 
+    let mut interval = create_interval(POLL_INTERVAL);
+
     let mut buf = [0u8; 2048];
+    let mut old = RamUsage::default();
 
     loop {
         interval.tick().await;
@@ -34,17 +74,19 @@ pub async fn poll(mut interval: Interval) {
                 let total = find_value(text, "MemTotal").unwrap_or(0);
                 let available = find_value(text, "MemAvailable").unwrap_or(0);
 
-                unsafe {
-                    RAM = RamUsage { total, available };
+                let new = RamUsage { total, available };
+
+                if new != old {
+                    old = new;
+
+                    if tx.send(new).is_err() {
+                        return;
+                    }   
                 }
             }
-            Err(err) => {
-                eprintln!("Error retrieving RAM info: {err}");
-                continue;
-            }
+            Err(err) => eprintln!("Error retrieving RAM info: {err}")
         }
     }
-
 }
 
 fn find_value(text: &str, field: &'static str) -> Option<u64> {

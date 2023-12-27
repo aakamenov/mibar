@@ -4,48 +4,17 @@ mod cpu;
 mod ram;
 
 pub use date::*;
+pub use ram::RamUsage;
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::{
-    task,
-    time::{Interval, MissedTickBehavior, Duration, interval}
-};
+use cpu::CpuListener;
+use ram::RamListener;
 
-const CPU_POLL_INTERVAL: u64 = 800;
-const RAM_POLL_INTERVAL: u64 = 800;
+use tokio::time::{Interval, MissedTickBehavior, Duration, interval};
 
-static mut CPU_USAGE: AtomicU64 = AtomicU64::new(0);
-static mut RAM: RamUsage = RamUsage { total: 0, available: 0 };
+use crate::system_monitor::SystemMonitor;
 
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct RamUsage {
-    pub total: u64,
-    pub available: u64
-}
-
-pub fn init() {
-    task::spawn(async {
-        cpu::poll_usage(create_interval(CPU_POLL_INTERVAL)).await;
-    });
-
-    task::spawn(async {
-        ram::poll(create_interval(RAM_POLL_INTERVAL)).await;
-    });
-}
-
-#[inline]
-pub fn cpu_usage() -> f64 {
-    let usage = unsafe {
-        CPU_USAGE.load(Ordering::Acquire)
-    };
-
-    f64::from_bits(usage)
-}
-
-#[inline]
-pub fn ram_usage() -> RamUsage {
-    unsafe { RAM }
-}
+pub static CPU: SystemMonitor<CpuListener> = SystemMonitor::new();
+pub static RAM: SystemMonitor<RamListener> = SystemMonitor::new();
 
 #[inline]
 fn create_interval(ms: u64) -> Interval {
@@ -53,16 +22,4 @@ fn create_interval(ms: u64) -> Interval {
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     interval
-}
-
-impl RamUsage {
-    #[inline]
-    pub fn used(&self) -> u64 {
-        self.total - self.available
-    }
-
-    #[inline]
-    pub fn used_percentage(&self) -> f64 {
-        (self.used() as f64 / self.total as f64) * 100f64
-    }
 }

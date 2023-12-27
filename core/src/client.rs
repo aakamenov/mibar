@@ -60,9 +60,7 @@ pub fn run(
     mut builder: runtime::Builder,
     window: impl Into<Window>,
     root: impl Element + Send + 'static,
-    mut theme: Theme,
-    // TODO: Temporary hack to init sysinfo
-    on_init: impl FnOnce(&runtime::Handle)
+    mut theme: Theme
 ) {
     let runtime = builder.build().unwrap();
 
@@ -87,8 +85,6 @@ pub fn run(
     }).unwrap();
 
     runtime.block_on(async {
-        on_init(runtime.handle());
-
         while let Some(request) = ui_recv.recv().await {
             match request.action {
                 WindowAction::Open { config, make_ui } => {

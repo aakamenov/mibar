@@ -1,11 +1,17 @@
-use std::{io::SeekFrom, sync::atomic::Ordering};
+use std::{io::SeekFrom, pin::Pin, future::Future};
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
     fs::File,
-    time::Interval
+    sync::watch::Sender
 };
 
-use super::CPU_USAGE;
+use crate::system_monitor::Listener;
+
+use super::create_interval;
+
+const POLL_INTERVAL: u64 = 800;
+
+pub struct CpuListener;
 
 #[derive(Clone, Copy, Default, Debug)]
 struct CpuTime {
@@ -13,14 +19,29 @@ struct CpuTime {
     total_time: u64
 }
 
-pub async fn poll_usage(mut interval: Interval) {
+impl Listener for CpuListener {
+    type Value = f64;
+
+    fn initial_value() -> Self::Value {
+        0f64
+    }
+
+    fn run(tx: Sender<Self::Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(poll_usage(tx))
+    }
+}
+
+async fn poll_usage(tx: Sender<f64>) {
     let mut file = match File::open("/proc/stat").await {
         Ok(file) => file,
         Err(err) => {
             eprintln!("Error retrieving CPU stats: {err}");
+            
             return;
         }
     };
+
+    let mut interval = create_interval(POLL_INTERVAL);
 
     let mut buf = [0u8; 256];
     let mut new = CpuTime::default();
@@ -89,14 +110,11 @@ pub async fn poll_usage(mut interval: Interval) {
                 let total_time = new.total_time.saturating_sub(old.total_time).max(1) as f64;
                 let usage = ((work_time / total_time) * 100f64).min(100f64);
 
-                unsafe {
-                    CPU_USAGE.store(usage.to_bits(), Ordering::Release)
+                if tx.send(usage).is_err() {
+                    return;
                 }
             }
-            Err(err) => {
-                eprintln!("Error retrieving CPU stats: {err}");
-                continue;
-            }
+            Err(err) => eprintln!("Error retrieving CPU stats: {err}")
         }
     }
 }

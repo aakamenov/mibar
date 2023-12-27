@@ -7,15 +7,9 @@ use mibar_core::{
     ValueSender, TypedId, Size
 };
 
-use tokio::{
-    time::{Duration, interval},
-    task::JoinHandle
-};
+use tokio::task::JoinHandle;
 
 use crate::sys_info::{self, RamUsage};
-
-
-const UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
 
 pub struct Ram {
     style: Option<text::StyleFn>
@@ -58,13 +52,13 @@ impl Element for Ram {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
+        let mut rx = sys_info::RAM.subscribe(ctx.runtime_handle());
         let handle = ctx.task_with_sender(|sender: ValueSender<RamUsage>| {
             async move {
-                let mut interval = interval(UPDATE_INTERVAL);
-
                 loop {
-                    interval.tick().await;
-                    sender.send(sys_info::ram_usage());
+                    if let Ok(value) = rx.recv().await {
+                        sender.send(*value);
+                    }
                 }
             }
         });

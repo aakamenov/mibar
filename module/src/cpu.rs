@@ -9,12 +9,7 @@ use mibar_core::{
 
 use crate::sys_info;
 
-use tokio::{
-    time::{Duration, interval},
-    task::JoinHandle
-};
-
-const UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
+use tokio::task::JoinHandle;
 
 pub struct Cpu {
     style: Option<text::StyleFn>
@@ -54,13 +49,13 @@ impl Element for Cpu {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
+        let mut rx = sys_info::CPU.subscribe(ctx.runtime_handle());
         let handle = ctx.task_with_sender(|sender: ValueSender<f64>| {
             async move {
-                let mut interval = interval(UPDATE_INTERVAL);
-
                 loop {
-                    interval.tick().await;
-                    sender.send(sys_info::cpu_usage());
+                    if let Ok(value) = rx.recv().await {
+                        sender.send(*value);
+                    }
                 }
             }
         });

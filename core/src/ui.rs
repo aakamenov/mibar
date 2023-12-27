@@ -530,7 +530,12 @@ macro_rules! impl_context_method {
 impl_context_method! {
     InitCtx<'_>,
     UpdateCtx<'_>,
-    {
+    {   
+        #[inline]
+        pub fn runtime_handle(&self) -> &runtime::Handle {
+            &self.ui.rt_handle
+        }
+
         #[inline]
         #[doc = r"A fire and forget type task that does not produce any result.
 This will NOT call [`Widget::task_result`] when complete."]

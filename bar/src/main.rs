@@ -8,8 +8,7 @@ use mibar::{
         battery::{self, Battery},
         cpu::Cpu,
         ram::Ram,
-        volume::{pulseaudio, PulseAudioVolume},
-        sys_info
+        volume::{pulseaudio, PulseAudioVolume}
     },
     widget::{
         flex::{Flex, FlexBuilder},
@@ -43,7 +42,7 @@ fn main() {
 
     let window = Bar::new(40, Location::Top);
 
-    run(builder, window, build(), theme(), |_| sys_info::init());
+    run(builder, window, build(), theme());
 }
 
 fn theme() -> Theme {

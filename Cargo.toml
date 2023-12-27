@@ -20,7 +20,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace.dependencies]
-miibar = { path = "." }
+mibar = { path = "." }
 mibar-core = { path = "core" }
 mibar-module = { path = "module" }
 tokio = { version = "1.28.1", default-features = false, features = ["full"] }
