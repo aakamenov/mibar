@@ -36,7 +36,7 @@ impl DateTime {
 }
 
 fn get_time() -> (String, i32) {
-    const UTC_OFFSET: u8 = 3;
+    const UTC_OFFSET: u8 = 2;
     const WEEKDAYS: &[&str] = &["Sun", "Mon", "Tue", "Wen", "Thu", "Fri", "Sat"];
 
     let Some(date) = Date::now_with_offset(UTC_OFFSET) else {

@@ -7,12 +7,10 @@ use smithay_client_toolkit::{
             Connection, QueueHandle
         }
     },
-    shell::{
-        xdg::{
-            window::{Window as XdgWindow, WindowConfigure, WindowHandler},
-            popup::{Popup as SctkPopup, PopupHandler, PopupConfigure, ConfigureKind},
-            XdgShell, XdgPositioner
-        },
+    shell::xdg::{
+        window::{Window as XdgWindow, WindowConfigure, WindowHandler},
+        popup::{Popup as SctkPopup, PopupHandler, PopupConfigure, ConfigureKind},
+        XdgShell, XdgPositioner
     },
     delegate_xdg_shell, delegate_xdg_popup, delegate_xdg_window
 };

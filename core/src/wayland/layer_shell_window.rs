@@ -55,6 +55,11 @@ impl WaylandWindow for LayerShellWindowState {
 
         surface.set_size(config.desired_size.0, config.desired_size.1);
         surface.set_anchor(config.anchor);
+
+        if let Some(zone) = config.exclusive_zone {
+            surface.set_exclusive_zone(zone);
+        }
+
         surface.commit();
 
         let state = LayerShellWindowState {
