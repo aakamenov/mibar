@@ -10,6 +10,8 @@ use tokio::{
     runtime
 };
 
+use crate::StaticPtr;
+
 pub trait Listener {
     type Value: Send + Sync;
 
@@ -25,7 +27,7 @@ pub struct SystemMonitor<T: Listener> {
 
 pub struct Receiver<T: Listener> {
     rx: watch::Receiver<T::Value>,
-    handle: UnsubscribeHandle<T> 
+    handle: StaticPtr<SystemMonitor<T>> 
 }
 
 struct State<T: Listener> {
@@ -33,8 +35,6 @@ struct State<T: Listener> {
     rx: watch::Receiver<T::Value>,
     handle: JoinHandle<()>
 }
-
-struct UnsubscribeHandle<T: Listener>(*const SystemMonitor<T>);
 
 impl<T: Listener> SystemMonitor<T> {
     pub const fn new() -> Self {
@@ -52,7 +52,7 @@ impl<T: Listener> SystemMonitor<T> {
 
                 Receiver {
                     rx: state.rx.clone(),
-                    handle: UnsubscribeHandle(self)
+                    handle: StaticPtr::new(self)
                 }
             }
             None => {
@@ -67,7 +67,7 @@ impl<T: Listener> SystemMonitor<T> {
 
                 Receiver {
                     rx,
-                    handle: UnsubscribeHandle(self)
+                    handle: StaticPtr::new(self)
                 }
             }
         }
@@ -99,10 +99,6 @@ impl<T: Listener> Receiver<T> {
 
 impl<T: Listener> Drop for Receiver<T> {
     fn drop(&mut self) {
-        let monitor = unsafe { &*(self.handle.0) };
-        monitor.unsubscribe();
+        self.handle.unsubscribe();
     }
 }
-
-unsafe impl<T: Listener> Sync for UnsubscribeHandle<T> { }
-unsafe impl<T: Listener> Send for UnsubscribeHandle<T> { }

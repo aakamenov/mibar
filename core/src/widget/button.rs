@@ -13,7 +13,7 @@ use super::{
 };
 
 pub type StyleFn = fn(ButtonState) -> QuadStyle;
-pub type OnClickFn<E> = fn(state: &mut State<E>, ctx: &mut UpdateCtx);
+pub type OnClickFn<E> = Box<dyn Fn(&mut UpdateCtx, &TypedId<E>)>;
 pub type OnStateChangeFn<E> = fn(
     state: &mut State<E>,
     ctx: &mut UpdateCtx,
@@ -42,30 +42,36 @@ pub struct ButtonWidget<E: Element> {
 }
 
 pub struct State<E: Element> {
-    pub child: TypedId<E>,
-    pub on_click: OnClickFn<E>,
-    pub on_change: Option<OnStateChangeFn<E>>,
-    pub style: Option<StyleFn>,
-    pub padding: Padding,
-    pub width: Length,
-    pub height: Length,
+    child: TypedId<E>,
+    on_click: OnClickFn<E>,
+    on_change: Option<OnStateChangeFn<E>>,
+    style: Option<StyleFn>,
+    padding: Padding,
+    width: Length,
+    height: Length,
     is_hovered: bool,
     is_active: bool
 }
 
 impl Button<Text> {
     #[inline]
-    pub fn new(text: impl Into<String>, on_click: OnClickFn<Text>) -> Self {
+    pub fn new(
+        text: impl Into<String>,
+        on_click: impl Fn(&mut UpdateCtx, &TypedId<Text>) + 'static
+    ) -> Self {
         Self::with_child(Text::new(text), on_click)
     }
 }
 
 impl<E: Element> Button<E> {
     #[inline]
-    pub fn with_child(child: E, on_click: OnClickFn<E>) -> Self {
+    pub fn with_child(
+        child: E,
+        on_click: impl Fn(&mut UpdateCtx, &TypedId<E>) + 'static
+    ) -> Self {
         Self {
             child,
-            on_click,
+            on_click: Box::new(on_click),
             on_change: None,
             style: None,
             padding: Padding::from(4f32),
@@ -214,7 +220,7 @@ impl<E: Element + 'static> Widget for ButtonWidget<E> {
                     if matches!(button, MouseButton::Left) =>
                 {
                     if state.is_active {
-                        (state.on_click)(state, ctx);
+                        (state.on_click)(ctx, &state.child);
 
                         ctx.request_redraw();
                         state.is_active = false;

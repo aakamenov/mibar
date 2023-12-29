@@ -1,17 +1,16 @@
-mod hyprland;
 mod button;
 
 pub use button::{StyleFn, Style, ButtonStyle};
 
 use std::{any::Any, mem::MaybeUninit};
 
-use hyprland::{WorkspacesChanged, start_listener_loop};
-
 use mibar_core::{
     widget::{SizeConstraints, Element, Widget},
     MouseEvent, Size, InitCtx, DrawCtx, LayoutCtx,
     UpdateCtx, Event, ValueSender, TypedId
 };
+
+use crate::hyprland::{self, WorkspacesChanged, SubscriptionToken};
 
 const WORKSPACE_COUNT: usize = 8;
 const SPACING: f32 = 4f32;
@@ -22,7 +21,8 @@ pub struct Workspaces {
 pub struct WorkspacesWidget;
 
 pub struct State {
-    buttons: [TypedId<button::Button>; WORKSPACE_COUNT]
+    buttons: [TypedId<button::Button>; WORKSPACE_COUNT],
+    _token: SubscriptionToken<ValueSender<WorkspacesChanged>>
 }
 
 impl Workspaces {
@@ -40,9 +40,11 @@ impl Element for Workspaces {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let _ = ctx.task_with_sender(|sender: ValueSender<WorkspacesChanged>| {
-            start_listener_loop(sender)
-        });
+        let token = hyprland::subscribe_workspaces(
+            ctx.runtime_handle(),
+            ctx.window_id(),
+            ctx.value_sender()
+        );
 
         let mut buttons: MaybeUninit<[TypedId<button::Button>; WORKSPACE_COUNT]> =
             MaybeUninit::uninit();
@@ -57,7 +59,8 @@ impl Element for Workspaces {
         }
 
         let buttons = unsafe { buttons.assume_init() };
-        (WorkspacesWidget, State { buttons })
+
+        (WorkspacesWidget, State { buttons, _token: token })
     }
 }
 

@@ -4,7 +4,8 @@ use std::{
     future::Future,
     marker::PhantomData,
     collections::VecDeque,
-    borrow::Borrow
+    borrow::Borrow,
+    hash::{Hash, Hasher}
 };
 
 use tiny_skia::PixmapMut;
@@ -537,6 +538,14 @@ impl_context_method! {
         }
 
         #[inline]
+        pub fn value_sender<T: Send + 'static>(&self) -> ValueSender<T> {
+            ValueSender::new(
+                self.current,
+                self.ui.task_send.clone()
+            )
+        }
+
+        #[inline]
         #[doc = r"A fire and forget type task that does not produce any result.
 This will NOT call [`Widget::task_result`] when complete."]
         #[must_use = r"It is your responsibility to abort long running or infinite loop
@@ -696,6 +705,7 @@ impl<T: Send + 'static> ValueSender<T> {
         }
     }
 
+    #[inline]
     pub fn send(&self, value: T) {
         let result = TaskResult {
             id: self.id,
@@ -703,6 +713,13 @@ impl<T: Send + 'static> ValueSender<T> {
         };
 
         self.sender.send(result).unwrap()
+    }
+}
+
+impl<T: Send> Hash for ValueSender<T> {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.id);
     }
 }
 

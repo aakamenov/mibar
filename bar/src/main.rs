@@ -8,7 +8,8 @@ use mibar::{
         battery::{self, Battery},
         cpu::Cpu,
         ram::Ram,
-        volume::{pulseaudio, PulseAudioVolume}
+        volume::{pulseaudio, PulseAudioVolume},
+        keyboard_layout::KeyboardLayout
     },
     widget::{
         flex::{Flex, FlexBuilder},
@@ -35,6 +36,9 @@ const TEXT: Color = Color::rgb(217, 221, 222);
 
 const PRIMARY: Color = PRIMARY_GREEN;
 const OUTLINE: Color = Color::rgb(172, 166, 149);
+
+const KEYBOARD_DEVICE: &str = "ducky-ducky-one-3-sf-rgb-1";
+const BATTERY_DEVICE: &str = "BAT0";
 
 fn main() {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -70,8 +74,9 @@ fn build() -> impl Element {
         builder.add_flex(left, 1f32);
         
         let right = Flex::row(|builder| {
+            builder.add_non_flex(KeyboardLayout::new(KEYBOARD_DEVICE));
             builder.add_non_flex(PulseAudioVolume::new(format_audio));
-            builder.add_non_flex(Battery::new("BAT0", Duration::from_secs(30), battery_style));
+            builder.add_non_flex(Battery::new(BATTERY_DEVICE, Duration::from_secs(30), battery_style));
             builder.add_non_flex(Cpu::new());
             builder.add_non_flex(Ram::new());
         })
