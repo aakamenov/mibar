@@ -13,6 +13,7 @@ use mibar::{
     },
     widget::{
         flex::{Flex, FlexBuilder},
+        button::{self, ButtonState},
         Element, Padding, Alignment
     },
     window::bar::{Bar, Location},
@@ -50,17 +51,26 @@ fn main() {
 }
 
 fn theme() -> Theme {
-    Theme {
-        font: Font {
+    Theme::new(
+        Font {
             family: Family::Name("SauceCodePro Nerd Font"),
             ..Font::default()
         },
-        font_size: 16f32,
-        text: || TEXT,
-        button: |_| QuadStyle::solid_background(Color::TRANSPARENT)
-            .rounded(4f32)
-            .with_border(1f32, OUTLINE)
-    }
+        16f32,
+        || TEXT,
+        |state| {
+            let (bg, text_color) = match state {
+                ButtonState::Normal => (Color::TRANSPARENT, None),
+                ButtonState::Hovered | ButtonState::Active => (OUTLINE, Some(BASE)),
+            };
+
+            let quad = QuadStyle::solid_background(bg)
+                .rounded(4f32)
+                .with_border(1f32, OUTLINE);
+
+            button::Style { quad, text_color }
+        }
+    )
 }
 
 fn build() -> impl Element {

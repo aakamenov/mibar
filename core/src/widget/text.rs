@@ -120,8 +120,11 @@ impl Widget for TextWidget {
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        let style = state.style.unwrap_or(ctx.theme().text);
-        let color = (style)();
+        let color = if let Some(color_fn) = state.style {
+            color_fn()
+        } else {
+            ctx.theme().text_color()
+        };
         
         let rect = ctx.layout();
         ctx.renderer().fill_text(&state.info, rect, color);

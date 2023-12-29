@@ -4,7 +4,7 @@ use crate::{
     geometry::Size,
     ui::{InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId, Event},
     draw::{Quad, QuadStyle},
-    MouseEvent, MouseButton
+    MouseEvent, MouseButton, Color
 };
 use super::{
     text::Text,
@@ -12,13 +12,15 @@ use super::{
     Padding, Length, Alignment, Axis
 };
 
-pub type StyleFn = fn(ButtonState) -> QuadStyle;
+pub type StyleFn = fn(ButtonState) -> Style;
 pub type OnClickFn<E> = Box<dyn Fn(&mut UpdateCtx, &TypedId<E>)>;
-pub type OnStateChangeFn<E> = fn(
-    state: &mut State<E>,
-    ctx: &mut UpdateCtx,
-    btn_state: ButtonState
-);
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Style {
+    pub quad: QuadStyle,
+    /// Overwrite the default text color for child widget.
+    pub text_color: Option<Color>
+}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ButtonState {
@@ -30,7 +32,6 @@ pub enum ButtonState {
 pub struct Button<E: Element> {
     child: E,
     on_click: OnClickFn<E>,
-    on_change: Option<OnStateChangeFn<E>>,
     style: Option<StyleFn>,
     padding: Padding,
     width: Length,
@@ -44,7 +45,6 @@ pub struct ButtonWidget<E: Element> {
 pub struct State<E: Element> {
     child: TypedId<E>,
     on_click: OnClickFn<E>,
-    on_change: Option<OnStateChangeFn<E>>,
     style: Option<StyleFn>,
     padding: Padding,
     width: Length,
@@ -72,7 +72,6 @@ impl<E: Element> Button<E> {
         Self {
             child,
             on_click: Box::new(on_click),
-            on_change: None,
             style: None,
             padding: Padding::from(4f32),
             width: Length::Fit,
@@ -107,13 +106,6 @@ impl<E: Element> Button<E> {
 
         self
     }
-
-    #[inline]
-    pub fn on_state_change(mut self, handler: OnStateChangeFn<E>) -> Self {
-        self.on_change = Some(handler);
-
-        self
-    }
 }
 
 impl<E: Element + 'static> Element for Button<E> {
@@ -129,7 +121,6 @@ impl<E: Element + 'static> Element for Button<E> {
             State {
                 child: ctx.new_child(self.child),
                 on_click: self.on_click,
-                on_change: self.on_change,
                 style: self.style,
                 is_hovered: false,
                 is_active: false,
@@ -190,8 +181,6 @@ impl<E: Element + 'static> Widget for ButtonWidget<E> {
     }
 
     fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
-        let old_state = state.current_state();
-
         match event {
             Event::Mouse(event) => match event {
                 MouseEvent::MouseMove(pos) => {
@@ -229,14 +218,6 @@ impl<E: Element + 'static> Widget for ButtonWidget<E> {
                 _ => { }
             }
         }
-
-        if let Some(on_change) = state.on_change {
-            let new_state = state.current_state();
-
-            if old_state != new_state {
-                (on_change)(state, ctx, new_state);
-            }      
-        }   
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
@@ -244,9 +225,15 @@ impl<E: Element + 'static> Widget for ButtonWidget<E> {
         let style = style(state.current_state());
 
         let rect = ctx.layout();
-        ctx.renderer().fill_quad(Quad { rect, style });
+        ctx.renderer().fill_quad(Quad { rect, style: style.quad });
 
-        ctx.draw(&state.child);
+        if let Some(color) = style.text_color {
+            ctx.theme().push_text_color(color);
+            ctx.draw(&state.child);
+            ctx.theme().pop_text_color();
+        } else {
+            ctx.draw(&state.child);
+        }
     }
 }
 
