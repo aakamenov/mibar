@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{borrow::Borrow, marker::PhantomData};
 
 use crate::{
     geometry::Size,
@@ -7,9 +7,9 @@ use crate::{
     MouseEvent, MouseButton, Color
 };
 use super::{
-    text::Text,
-    Element, Widget, SizeConstraints,
-    Padding, Length, Alignment, Axis
+    container,
+    Element, Widget, SizeConstraints, Text,
+    Padding, Length, Alignment
 };
 
 pub type StyleFn = fn(ButtonState) -> Style;
@@ -148,36 +148,16 @@ impl<E: Element + 'static> Widget for ButtonWidget<E> {
         ctx: &mut LayoutCtx,
         bounds: SizeConstraints
     ) -> Size {
-        let bounds = bounds.width(state.width).height(state.height);
-        
-        let layout_bounds = bounds.pad(state.padding).loosen();
-        let child_size = ctx.layout(&state.child, layout_bounds);
-
-        let width = match state.width {
-            Length::Fit => {
-                child_size.width + state.padding.horizontal()
-            }
-            Length::Expand | Length::Fixed(_) => {
-                bounds.max.width
-            }
-        };
-
-        let height = match state.height {
-            Length::Fit => {
-                child_size.height + state.padding.vertical()
-            }
-            Length::Expand | Length::Fixed(_) => {
-                bounds.max.height
-            }
-        };
-
-        let size = bounds.constrain(Size::new(width, height));
-        ctx.position(&state.child, |rect| {
-            Alignment::Center.align(rect, size.width, Axis::Horizontal);
-            Alignment::Center.align(rect, size.height, Axis::Vertical);
-        });
-
-        size
+        container::layout_child(
+            ctx,
+            state.child.borrow(),
+            bounds,
+            state.padding,
+            state.width,
+            state.height,
+            Alignment::Center,
+            Alignment::Center
+        )
     }
 
     fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {

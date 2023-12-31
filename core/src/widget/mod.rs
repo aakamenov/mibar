@@ -2,12 +2,15 @@ pub mod flex;
 pub mod text;
 pub mod button;
 pub mod image;
+pub mod container;
 mod layout;
 
 pub use layout::*; 
 pub use flex::{Flex, FlexBuilder};
 pub use text::Text;
 pub use button::{Button, ButtonState};
+pub use image::Image;
+pub use container::Container;
 
 use std::any::{Any, type_name};
 
