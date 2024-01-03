@@ -1,6 +1,6 @@
 use std::{
     thread,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::RwLock,
     hash::{Hash, Hasher},
     collections::hash_map::Entry
 };
@@ -23,6 +23,8 @@ use crate::{
     widget::Element,
     Ui, Theme, TaskResult
 };
+
+pub(crate) static WINDOWS: RwLock<Vec<WindowId>> = RwLock::new(Vec::new());
 
 pub(crate) type MakeUiFn = 
     Box<dyn FnOnce(
@@ -56,10 +58,10 @@ pub(crate) enum ClientRequest {
     ThemeChanged(Theme)
 }
 
-pub fn run(
+pub fn run<E: Element>(
     mut builder: runtime::Builder,
     window: impl Into<Window>,
-    root: impl Element + Send + 'static,
+    root: impl FnOnce() -> E + Send + 'static,
     mut theme: Theme
 ) {
     let runtime = builder.build().unwrap();
@@ -69,7 +71,10 @@ pub fn run(
 
     let id = WindowId::new();
     let make_ui = Box::new(move |theme, surface, rt_handle, task_send, client_send| {
-        Ui::new(id, surface, rt_handle, task_send, client_send, theme, root)
+        let root = root();
+        let ui = Ui::new(id, surface, rt_handle, task_send, client_send, theme, root);
+
+        ui
     });
 
     ui_send.send(UiRequest {
@@ -156,9 +161,32 @@ pub fn run(
 
 impl WindowId {
     pub(crate) fn new() -> Self {
-        static WINDOW_ID: AtomicU64 = AtomicU64::new(1);
+        static mut WINDOW_ID: u64 = 0;
 
-        Self(WINDOW_ID.fetch_add(1, Ordering::Relaxed))
+        let mut windows = WINDOWS.write().unwrap();
+
+        // Safety: Dereferencing WINDOW_ID happens while we are holding the write lock.
+        unsafe {
+            let id = Self(WINDOW_ID);
+            WINDOW_ID += 1;
+
+            windows.push(id);
+
+            id
+        }
+    }
+
+    #[inline]
+    pub fn is_alive(&self) -> bool {
+        WINDOWS.read().unwrap().contains(self)
+    }
+
+    pub(crate) fn kill(&self) {
+        let mut windows = WINDOWS.write().unwrap();
+        
+        if let Some(index) = windows.iter().position(|x| x == self) {
+            windows.swap_remove(index);
+        }
     }
 }
 

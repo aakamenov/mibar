@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{time::Duration, process::Command};
 
 use mibar::{
     tokio,
@@ -12,11 +12,15 @@ use mibar::{
         keyboard_layout::KeyboardLayout
     },
     widget::{
-        flex::{Flex, FlexBuilder},
         button::{self, ButtonState},
-        Element, Padding, Alignment
+        Element, Padding, Alignment,
+        Button, Text, Flex, FlexBuilder, State, StateHandle
     },
-    window::bar::{Bar, Location},
+    window::{
+        bar::{self, Bar},
+        side_panel::{self, SidePanel},
+        WindowId
+    },
     Theme, Font, Family, Color, QuadStyle, run
 };
 
@@ -41,21 +45,40 @@ const OUTLINE: Color = Color::rgb(172, 166, 149);
 const KEYBOARD_DEVICE: &str = "ducky-ducky-one-3-sf-rgb-1";
 const BATTERY_DEVICE: &str = "BAT0";
 
+const BAR_SIZE: u32 = 40;
+
+#[derive(Debug)]
+struct BarState {
+    power_menu: Option<WindowId>
+}
+
 fn main() {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.worker_threads(4);
     builder.enable_all();
 
-    let window = Bar::new(40, Location::Top);
+    let window = Bar::new(BAR_SIZE, bar::Location::Top);
 
-    run(builder, window, build(), theme());
+    run(builder, window, build, theme());
+}
+
+fn font() -> Font {
+    Font {
+        family: Family::Name("SauceCodePro Nerd Font"),
+        ..Font::default()
+    }
+}
+
+fn font_mono() -> Font {
+    Font {
+        family: Family::Name("SauceCodePro Nerd Font Mono"),
+        ..Font::default()
+    }
 }
 
 fn theme() -> Theme {
     Theme::new(
-        Font {
-            family: Family::Name("SauceCodePro Nerd Font"),
-            ..Font::default()
-        },
+        font(),
         16f32,
         || TEXT,
         |state| {
@@ -74,32 +97,128 @@ fn theme() -> Theme {
 }
 
 fn build() -> impl Element {
-    let create = |builder: &mut FlexBuilder| {
-        let left = Flex::row(|builder| {
-            builder.add_non_flex(Workspaces::new(workspaces_style));
-            builder.add_non_flex(DateTime::new());
-        })
-        .spacing(SPACING);
-
-        builder.add_flex(left, 1f32);
-        
-        let right = Flex::row(|builder| {
-            builder.add_non_flex(KeyboardLayout::new(KEYBOARD_DEVICE));
-            builder.add_non_flex(PulseAudioVolume::new(format_audio));
-            builder.add_non_flex(Battery::new(BATTERY_DEVICE, Duration::from_secs(30), battery_style));
-            builder.add_non_flex(Cpu::new());
-            builder.add_non_flex(Ram::new());
-        })
-        .main_alignment(Alignment::End)
-        .spacing(SPACING);
-
-        builder.add_flex(right, 1f32);
+    let state = BarState {
+        power_menu: None
     };
 
-    Flex::row(create)
-        .spacing(SPACING)
-        .padding(PADDING)
-        .style(|| QuadStyle::solid_background(BASE))
+    State::new(state, |handle| {
+        let create = |builder: &mut FlexBuilder| {
+            let left = Flex::row(|builder| {
+                builder.add_non_flex(Workspaces::new(workspaces_style));
+                builder.add_non_flex(DateTime::new());
+            })
+            .spacing(SPACING);
+
+            builder.add_flex(left, 1f32);
+            
+            let right = Flex::row(|builder| {
+                builder.add_non_flex(KeyboardLayout::new(KEYBOARD_DEVICE));
+                builder.add_non_flex(PulseAudioVolume::new(format_audio));
+                builder.add_non_flex(Battery::new(BATTERY_DEVICE, Duration::from_secs(30), battery_style));
+                builder.add_non_flex(Cpu::new());
+                builder.add_non_flex(Ram::new());
+                builder.add_non_flex(boot_menu_button(handle));
+            })
+            .main_alignment(Alignment::End)
+            .spacing(SPACING);
+
+            builder.add_flex(right, 1f32);
+        };
+
+        Flex::row(create)
+            .spacing(SPACING)
+            .padding(PADDING)
+            .style(|| QuadStyle::solid_background(BASE))
+    })
+}
+
+fn boot_menu_button(mut state: StateHandle<BarState>) -> Button<Text> {
+    let text = Text::new("⏻")
+        .text_size(22f32)
+        // Use the monospaced font because the icon gets cut otherwise.
+        // https://github.com/pop-os/cosmic-text/issues/182
+        .font(font_mono());
+
+    let size = BAR_SIZE as f32 - PADDING.vertical();
+    Button::with_child(text, move |ctx, _| {
+        match state.power_menu {
+            Some(window_id) if window_id.is_alive() => ctx.close_window(window_id),
+            _ => {
+                let panel = SidePanel::new(
+                    (155, 55),
+                    side_panel::Location::TopRight
+                );
+
+                let window_id = ctx.open_window(panel, boot_menu_panel);
+                state.power_menu = Some(window_id);
+            }
+        }
+    })
+    .width(size)
+    .height(size)
+    .style(|state| {
+        let (bg, text_color) = match state {
+            ButtonState::Normal => (Color::TRANSPARENT, PRIMARY_RED),
+            ButtonState::Hovered | ButtonState::Active => (PRIMARY_RED, BASE)
+        };
+
+        button::Style {
+            quad: QuadStyle::solid_background(bg)
+                .with_border(2f32, PRIMARY_RED),
+            text_color: Some(text_color)
+        }
+    })
+}
+
+fn boot_menu_panel() -> impl Element {
+    fn button_style(state: ButtonState, color: Color) -> button::Style {
+        let (bg, text_color) = match state {
+            ButtonState::Normal => (Color::TRANSPARENT, color),
+            ButtonState::Hovered | ButtonState::Active => (color, BASE)
+        };
+
+        button::Style {
+            quad: QuadStyle::solid_background(bg),
+            text_color: Some(text_color)
+        }
+    }
+
+    Flex::row(|builder| {
+        const ICON_SIZE: f32 = 24f32;
+
+        builder.add_non_flex({
+            let col = Flex::column(|builder| {
+                builder.add_non_flex(Text::new("⏻").font(font_mono()).text_size(ICON_SIZE));
+                builder.add_non_flex(Text::new("Shutdown").font(font_mono()));
+            });
+
+            Button::with_child(col, |_, _| {
+                if let Err(err) = Command::new("shutdown").arg("-h").arg("now").spawn() {
+                    eprintln!("Failed to execute shutdown command: {err}");
+                }
+            })
+            .padding(0f32)
+            .style(|state| button_style(state, PRIMARY_RED))
+        });
+
+        builder.add_non_flex({
+            let col = Flex::column(|builder| {
+                builder.add_non_flex(Text::new("󰜉").font(font_mono()).text_size(ICON_SIZE));
+                builder.add_non_flex(Text::new("Reboot").font(font_mono()));
+            });
+
+            Button::with_child(col, |_, _| {
+                if let Err(err) = Command::new("reboot").spawn() {
+                    eprintln!("Failed to execute reboot command: {err}");
+                }
+            })
+            .padding(0f32)
+            .style(|state| button_style(state, PRIMARY_ORANGE))
+        });
+    })
+    .spacing(SPACING)
+    .padding(PADDING)
+    .style(|| QuadStyle::solid_background(BASE).with_border(1f32, OUTLINE))
 }
 
 fn battery_style(capacity: u8) -> battery::Style {

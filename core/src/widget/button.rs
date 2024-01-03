@@ -13,7 +13,7 @@ use super::{
 };
 
 pub type StyleFn = fn(ButtonState) -> Style;
-pub type OnClickFn<E> = Box<dyn Fn(&mut UpdateCtx, &TypedId<E>)>;
+pub type OnClickFn<E> = Box<dyn FnMut(&mut UpdateCtx, &TypedId<E>)>;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Style {
@@ -57,7 +57,7 @@ impl Button<Text> {
     #[inline]
     pub fn new(
         text: impl Into<String>,
-        on_click: impl Fn(&mut UpdateCtx, &TypedId<Text>) + 'static
+        on_click: impl FnMut(&mut UpdateCtx, &TypedId<Text>) + 'static
     ) -> Self {
         Self::with_child(Text::new(text), on_click)
     }
@@ -67,7 +67,7 @@ impl<E: Element> Button<E> {
     #[inline]
     pub fn with_child(
         child: E,
-        on_click: impl Fn(&mut UpdateCtx, &TypedId<E>) + 'static
+        on_click: impl FnMut(&mut UpdateCtx, &TypedId<E>) + 'static
     ) -> Self {
         Self {
             child,

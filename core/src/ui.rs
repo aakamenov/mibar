@@ -91,7 +91,7 @@ pub(crate) enum UiEvent {
 }
 
 pub(crate) struct Ui {
-    ctx: UiCtx,
+    pub(crate) ctx: UiCtx,
     root: Id,
     size: Size
 }
@@ -295,9 +295,13 @@ impl Ui {
 }
 
 impl UiCtx {
+    #[inline]
+    pub fn window_id(&self) -> WindowId {
+        self.window_id
+    }
+
     fn dealloc(&mut self, id: Id) {
         let widget = self.widgets.remove(&id.0).unwrap();
-        widget.widget.destroy(widget.state);
 
         let parent = self.child_to_parent.remove(&id.0).unwrap();
         let children = self.parent_to_children.get_mut(&parent).unwrap();
@@ -313,11 +317,15 @@ impl UiCtx {
         for child in children {
             self.dealloc_impl(child);
         }
+
+        // We call destroy after we've deallocated the children as
+        // they could be relying on the parent being alive during their
+        // destroy() call (as is the case with StateHandle<T> in the State widget).
+        widget.widget.destroy(widget.state);
     }
 
     fn dealloc_impl(&mut self, id: WidgetId) {
         let widget = self.widgets.remove(&id).unwrap();
-        widget.widget.destroy(widget.state);
 
         self.child_to_parent.remove(&id).unwrap();
 
@@ -328,6 +336,11 @@ impl UiCtx {
         for child in children {
             self.dealloc_impl(child);
         }
+
+        // We call destroy after we've deallocated the children as
+        // they could be relying on the parent being alive during their
+        // destroy() call (as is the case with StateHandle<T> in the State widget).
+        widget.widget.destroy(widget.state);
     }
 
     #[inline]
@@ -620,16 +633,18 @@ You can ignore the return value otherwise."]
 
         #[inline]
         pub fn window_id(&self) -> WindowId {
-            self.ui.window_id
+            self.ui.window_id()
         }
 
-        pub fn open_window(
+        pub fn open_window<E: Element>(
             &self,
             window: impl Into<Window>,
-            root: impl Element + Send + 'static
+            root: impl FnOnce() -> E + Send + 'static
         ) -> WindowId {
             let id = WindowId::new();
             let make_ui = Box::new(move |theme, surface, rt_handle, task_send, client_send| {
+                let root = root();
+
                 Ui::new(id, surface, rt_handle, task_send, client_send, theme, root)
             });
 

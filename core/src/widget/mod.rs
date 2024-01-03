@@ -3,6 +3,7 @@ pub mod text;
 pub mod button;
 pub mod image;
 pub mod container;
+pub mod state;
 mod layout;
 
 pub use layout::*; 
@@ -11,6 +12,7 @@ pub use text::Text;
 pub use button::{Button, ButtonState};
 pub use image::Image;
 pub use container::Container;
+pub use state::{State, StateHandle};
 
 use std::any::{Any, type_name};
 

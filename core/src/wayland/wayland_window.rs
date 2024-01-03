@@ -194,6 +194,8 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
                 }
             }
         }
+
+        self.state.ui.ctx.window_id().kill();
     }
 
     fn draw(&mut self) {
