@@ -1,6 +1,6 @@
 use smithay_client_toolkit::shell::wlr_layer::{Anchor, Layer};
 
-use super::layer_shell_window::LayerShellWindowConfig;
+use super::{layer_shell_window::LayerShellWindowConfig, WindowDimensions};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Location {
@@ -12,20 +12,20 @@ pub enum Location {
 
 #[derive(Clone, Copy, Debug)]
 pub struct SidePanel {
-    pub size: (u32, u32),
+    pub size: WindowDimensions,
     pub location: Location
 }
 
 impl SidePanel {
     #[inline]
-    pub fn new(size: (u32, u32), location: Location) -> Self {
+    pub fn new(size: WindowDimensions, location: Location) -> Self {
         Self { size, location }
     }
 }
 
 impl From<SidePanel> for LayerShellWindowConfig {
-    fn from(value: SidePanel) -> Self {
-        let anchor = match value.location {
+    fn from(panel: SidePanel) -> Self {
+        let anchor = match panel.location {
             Location::TopLeft => Anchor::TOP | Anchor::LEFT,
             Location::TopRight => Anchor::TOP | Anchor::RIGHT,
             Location::BottomLeft => Anchor::BOTTOM | Anchor::LEFT,
@@ -35,7 +35,7 @@ impl From<SidePanel> for LayerShellWindowConfig {
         Self {
             anchor,
             layer: Layer::Top,
-            desired_size: value.size,
+            size: panel.size,
             exclusive_zone: None
         }
     }

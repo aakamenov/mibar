@@ -16,29 +16,29 @@ use smithay_client_toolkit::{
 };
 
 use super::{
-    wayland_window::{State, WaylandWindow, WindowSurface},
-    WindowEvent
+    wayland_window::{WaylandWindow, WindowSurface, State},
+    WindowEvent, WindowDimensions
 };
-use crate::ui::UiEvent;
+use crate::{ui::{Ui, UiEvent}, Size};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Popup {
-    pub size: (u32, u32)
+    pub size: WindowDimensions
 }
 
 pub(crate) struct PopupWindowState {
-    popup: SctkPopup,
+    popup: SctkPopup
 }
 
 #[derive(Debug)]
 pub(crate) struct PopupWindowConfig {
     pub parent: WindowSurface,
-    pub size: (u32, u32)
+    pub size: WindowDimensions
 }
 
 impl Popup {
     #[inline]
-    pub fn new(size: (u32, u32)) -> Self {
+    pub fn new(size: WindowDimensions) -> Self {
         Self { size }
     }
 }
@@ -50,13 +50,22 @@ impl WaylandWindow for PopupWindowState {
         config: Self::Config,
         globals: &GlobalList,
         queue_handle: &QueueHandle<State<Self>>,
-        surface: WlSurface
+        surface: WlSurface,
+        ui: &mut Ui
     ) -> (Self, WindowSurface) {
         let shell = XdgShell::bind(globals, queue_handle)
             .expect("xdg shell is not available");
 
         let positioner = XdgPositioner::new(&shell).unwrap();
-        positioner.set_size(config.size.0 as i32, config.size.1 as i32);
+
+        match config.size {
+            WindowDimensions::Fixed(size) => positioner.set_size(size.0 as i32, size.1 as i32),
+            WindowDimensions::Auto(max) => {
+                let size = ui.layout(Size::new(max.0 as f32, max.1 as f32));
+                positioner.set_size(size.width.round() as i32, size.height.round() as i32);
+            }
+        }
+
         positioner.set_offset(0, 0);
         positioner.set_anchor(Anchor::BottomLeft);
 

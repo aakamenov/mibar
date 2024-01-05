@@ -8,7 +8,6 @@ use bar::Bar;
 use side_panel::SidePanel;
 use popup::{Popup, PopupWindowConfig};
 use layer_shell_window::LayerShellWindowConfig;
-use wayland_window::WindowSurface;
 
 use crate::{Point, Vector};
 
@@ -17,6 +16,16 @@ pub enum Window {
     Bar(Bar),
     SidePanel(SidePanel),
     Popup(Popup)
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum WindowDimensions {
+    /// The window will exactly have the provided width and height.
+    Fixed((u32, u32)),
+    /// The window will be sized to its content. The provided width and height
+    /// will serve as the maximum dimensions that the window is allowed to have.
+    /// This constraint serves as a safety net in case the window ends up having a flex layout throughout.
+    Auto((u32, u32))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -95,22 +104,6 @@ impl MouseScrollDelta {
         match self {
             MouseScrollDelta::Line { x, y } => Vector::new(*x, *y),
             MouseScrollDelta::Pixel { x, y } => Vector::new(*x, *y)
-        }
-    }
-}
-
-impl Window {
-    #[inline]
-    pub(crate) fn into_config(self, surface: &WindowSurface) -> WindowConfig {
-        match self {
-            Window::Bar(bar) => WindowConfig::LayerShell(bar.into()),
-            Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
-            Window::Popup(popup) => WindowConfig::Popup(
-                PopupWindowConfig {
-                    parent: surface.clone(),
-                    size: popup.size
-                }
-            )
         }
     }
 }

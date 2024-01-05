@@ -19,7 +19,7 @@ use mibar::{
     window::{
         bar::{self, Bar},
         side_panel::{self, SidePanel},
-        WindowId
+        WindowId, WindowDimensions
     },
     Theme, Font, Family, Color, QuadStyle, run
 };
@@ -145,7 +145,7 @@ fn boot_menu_button(mut state: StateHandle<BarState>) -> Button<Text> {
             Some(window_id) if window_id.is_alive() => ctx.close_window(window_id),
             _ => {
                 let panel = SidePanel::new(
-                    (155, 55),
+                    WindowDimensions::Auto((256, 256)),
                     side_panel::Location::TopRight
                 );
 

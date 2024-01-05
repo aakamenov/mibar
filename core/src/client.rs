@@ -24,12 +24,11 @@ use crate::{
     Ui, Theme, TaskResult
 };
 
-pub(crate) static WINDOWS: RwLock<Vec<WindowId>> = RwLock::new(Vec::new());
+static WINDOWS: RwLock<Vec<WindowInfo>> = RwLock::new(Vec::new());
 
 pub(crate) type MakeUiFn = 
     Box<dyn FnOnce(
         Theme,
-        WindowSurface,
         runtime::Handle,
         Sender<TaskResult>,
         UnboundedSender<UiRequest>
@@ -58,6 +57,11 @@ pub(crate) enum ClientRequest {
     ThemeChanged(Theme)
 }
 
+struct WindowInfo {
+    id: WindowId,
+    surface: Option<WindowSurface>
+}
+
 pub fn run<E: Element>(
     mut builder: runtime::Builder,
     window: impl Into<Window>,
@@ -70,9 +74,9 @@ pub fn run<E: Element>(
     let (ui_send, mut ui_recv) = unbounded_channel::<UiRequest>();
 
     let id = WindowId::new();
-    let make_ui = Box::new(move |theme, surface, rt_handle, task_send, client_send| {
+    let make_ui = Box::new(move |theme, rt_handle, task_send, client_send| {
         let root = root();
-        let ui = Ui::new(id, surface, rt_handle, task_send, client_send, theme, root);
+        let ui = Ui::new(id, rt_handle, task_send, client_send, theme, root);
 
         ui
     });
@@ -170,7 +174,7 @@ impl WindowId {
             let id = Self(WINDOW_ID);
             WINDOW_ID += 1;
 
-            windows.push(id);
+            windows.push(WindowInfo { id, surface: None });
 
             id
         }
@@ -178,13 +182,28 @@ impl WindowId {
 
     #[inline]
     pub fn is_alive(&self) -> bool {
-        WINDOWS.read().unwrap().contains(self)
+        WINDOWS.read().unwrap().iter().find(|x| x.id == *self).is_some()
+    }
+
+    #[inline]
+    pub(crate) fn get_surface(&self) -> Option<WindowSurface> {
+        WINDOWS.read().unwrap().iter()
+            .find(|x| x.id == *self)
+            .map(|x| x.surface.clone())
+            .flatten()
+    }
+
+    #[inline]
+    pub(crate) fn set_surface(&self, surface: WindowSurface) {
+        let mut lock = WINDOWS.write().unwrap();
+        let info = lock.iter_mut().find(|x| x.id == *self).unwrap();
+        info.surface = Some(surface);
     }
 
     pub(crate) fn kill(&self) {
         let mut windows = WINDOWS.write().unwrap();
         
-        if let Some(index) = windows.iter().position(|x| x == self) {
+        if let Some(index) = windows.iter().position(|x| x.id == *self) {
             windows.swap_remove(index);
         }
     }

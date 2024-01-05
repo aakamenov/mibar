@@ -17,7 +17,7 @@ use smithay_client_toolkit::{
             Connection, QueueHandle
         }
     },
-    shell::{wlr_layer::LayerSurface, xdg::popup::Popup},
+    shell::{wlr_layer::LayerSurface, xdg::popup::Popup, WaylandSurface},
     compositor::{CompositorHandler, CompositorState},
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
@@ -54,7 +54,8 @@ pub(crate) trait WaylandWindow: Sized {
         config: Self::Config,
         globals: &GlobalList,
         queue_handle: &QueueHandle<State<Self>>,
-        surface: WlSurface
+        surface: WlSurface,
+        ui: &mut Ui
     ) -> (Self, WindowSurface);
 }
 
@@ -67,6 +68,7 @@ pub(crate) enum WindowSurface {
 pub(crate) struct State<W: WaylandWindow> {
     pub ui: Ui,
     pub window: W,
+    pub surface: WindowSurface,
     pub registry_state: RegistryState,
     pub seat_state: SeatState,
     pub pointer: Option<WlPointer>,
@@ -82,13 +84,23 @@ pub(crate) struct State<W: WaylandWindow> {
 #[derive(Debug)]
 pub(crate) struct Monitor {
     pub output: Option<WlOutput>,
-    pub viewport: Viewport
+    pub surface_info: SurfaceInfo
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Viewport {
+pub(crate) struct SurfaceInfo {
     pub logical_size: (u32, u32),
     pub scale_factor: f32
+}
+
+impl WindowSurface {
+    #[inline]
+    pub fn wl_surface(&self) -> &WlSurface {
+        match self {
+            WindowSurface::LayerShellSurface(surface) => surface.wl_surface(),
+            WindowSurface::XdgPopup(surface) => surface.wl_surface()
+        }
+    }
 }
 
 impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
@@ -139,14 +151,19 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
             }
         }).expect("Couldn't register ui task source with Wayland event loop.");
 
+        let mut ui = make_ui(theme, rt_handle, task_send, ui_send);
         let surface = compositor_state.create_surface(&queue_handle);
-        let (window, surface) = W::init(config, &globals, &queue_handle, surface);
+
+        let (window, surface) = W::init(config, &globals, &queue_handle, surface, &mut ui);
+
+        ui.ctx.window_id().set_surface(surface.clone());
 
         Self {
             event_loop,
             state: State {
-                ui: make_ui(theme, surface, rt_handle, task_send, ui_send),
+                ui,
                 window,
+                surface,
                 shm,
                 pool,
                 buffer: None,
@@ -158,7 +175,7 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
                 close: false,
                 monitor: Monitor {
                     output: None,
-                    viewport: Viewport {
+                    surface_info: SurfaceInfo {
                         logical_size: (256, 256),
                         scale_factor: 1f32
                     }
@@ -183,7 +200,7 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
                         WindowEvent::ScaleFactor(scale_factor) =>
                             self.state.ui.set_scale_factor(scale_factor),
                         WindowEvent::Resize(size) => {
-                            self.state.ui.layout(Size {
+                            self.state.ui.set_size(Size {
                                 width: size.0 as f32,
                                 height: size.1 as f32
                             });
@@ -203,10 +220,10 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
             return;
         }
 
-        let Viewport {
+        let SurfaceInfo {
             logical_size,
             scale_factor
-        } = self.state.monitor.viewport;
+        } = self.state.monitor.surface_info;
 
         let scale_factor = scale_factor as u32;
         let (width, height) = (
@@ -251,7 +268,7 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
 
         self.state.ui.draw(&mut pixmap);
 
-        let surface = self.state.ui.wl_surface();
+        let surface = self.state.surface.wl_surface();
         surface.damage_buffer(0, 0, width as i32, height as i32);
         surface.frame(&self.queue_handle, surface.clone());
         buffer.attach_to(surface).expect("buffer attach");
@@ -269,7 +286,7 @@ impl<W: WaylandWindow> CompositorHandler for State<W> {
         new_factor: i32,
     ) {
         let new_factor = new_factor as f32;
-        let viewport = &mut self.monitor.viewport;
+        let viewport = &mut self.monitor.surface_info;
         
         if new_factor == viewport.scale_factor {
             return;
@@ -277,7 +294,7 @@ impl<W: WaylandWindow> CompositorHandler for State<W> {
         viewport.scale_factor = new_factor;
 
         self.buffer = None;
-        self.ui.wl_surface().set_buffer_scale(new_factor as i32);
+        self.surface.wl_surface().set_buffer_scale(new_factor as i32);
 
         self.pending_events.push(
             UiEvent::Window(WindowEvent::ScaleFactor(new_factor))
@@ -429,7 +446,7 @@ impl<W: WaylandWindow> PointerHandler for State<W> {
                             y: vertical.discrete as f32
                         }
                     } else {
-                        let scale_factor = self.monitor.viewport.scale_factor as f32;
+                        let scale_factor = self.monitor.surface_info.scale_factor as f32;
                         MouseScrollDelta::Pixel {
                             x: horizontal.absolute as f32 * scale_factor,
                             y: vertical.absolute as f32 * scale_factor

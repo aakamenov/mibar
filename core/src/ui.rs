@@ -11,13 +11,7 @@ use std::{
 use tiny_skia::PixmapMut;
 use nohash::IntMap;
 use tokio::{runtime, task::JoinHandle, sync::mpsc::UnboundedSender};
-use smithay_client_toolkit::{
-    shell::WaylandSurface,
-    reexports::{
-        client::protocol::wl_surface::WlSurface,
-        calloop::channel::Sender
-    }
-};
+use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
 use crate::{
     geometry::{Rect, Size, Point},
@@ -27,7 +21,10 @@ use crate::{
     theme::Theme,
     draw::TextInfo,
     renderer::Renderer,
-    wayland::{wayland_window::WindowSurface, WindowEvent, MouseEvent},
+    wayland::{
+        popup::PopupWindowConfig,
+        WindowEvent, MouseEvent, WindowConfig
+    },
     client::{UiRequest, WindowId, WindowAction},
     window::Window,
     asset_loader::{self, AssetSource}
@@ -115,7 +112,6 @@ pub(crate) struct UiCtx {
     rt_handle: runtime::Handle,
     task_send: Sender<TaskResult>,
     client_send: UnboundedSender<UiRequest>,
-    surface: WindowSurface,
     window_id: WindowId
 }
 
@@ -128,7 +124,6 @@ struct WidgetState {
 impl Ui {
     pub fn new<E: Element>(
         window_id: WindowId,
-        surface: WindowSurface,
         rt_handle: runtime::Handle,
         task_send: Sender<TaskResult>,
         client_send: UnboundedSender<UiRequest>,
@@ -152,7 +147,6 @@ impl Ui {
             rt_handle,
             task_send,
             client_send,
-            surface,
             window_id
         };
 
@@ -170,20 +164,13 @@ impl Ui {
         }
     }
 
-    #[inline]
-    pub fn wl_surface(&self) -> &WlSurface {
-        match &self.ctx.surface {
-            WindowSurface::LayerShellSurface(surface) => surface.wl_surface(),
-            WindowSurface::XdgPopup(popup) => popup.wl_surface()
-        }
-    }
-
     pub fn set_theme(&mut self, theme: Theme) {
         self.ctx.theme = theme;
         self.ctx.needs_redraw = true;
     }
 
-    pub fn layout(&mut self, size: Size) {
+    /// Set a new `size` that the ui **has** to accommodate.
+    pub fn set_size(&mut self, size: Size) {
         if size == self.size {
             return;
         }
@@ -191,7 +178,20 @@ impl Ui {
         self.size = size;
         self.ctx.needs_redraw = true;
 
-        self.layout_impl();
+        self.layout_impl(SizeConstraints::tight(size));
+    }
+
+    /// Perform a layout using the given `size` which will serve as the maximum allowed space that the ui can use.
+    /// Returns the actual size that the ui content will fit in.
+    pub fn layout(&mut self, size: Size) -> Size {
+        let new_size = self.layout_impl(SizeConstraints::tight(size).loosen());
+
+        if new_size != self.size {
+            self.ctx.needs_redraw = true;
+            self.size = new_size;
+        }
+
+        self.size
     }
 
     pub fn event(&mut self, event: Event) {
@@ -228,7 +228,7 @@ impl Ui {
 
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
         if self.ctx.needs_layout {
-            self.layout_impl();
+            self.layout_impl(SizeConstraints::tight(self.size));
         }
 
         let mut ctx = DrawCtx {
@@ -257,12 +257,12 @@ impl Ui {
         }
     }
 
-    fn layout_impl(&mut self) {
+    fn layout_impl(&mut self, constraints: SizeConstraints) -> Size {
         let mut ctx = LayoutCtx {
             ui: &mut self.ctx
         };
 
-        ctx.layout(&self.root, SizeConstraints::tight(self.size));
+        let size = ctx.layout(&self.root, constraints);
 
         // Translate all widget positions from parent local space
         // to window space. This feels like a giant hack but enables us to have
@@ -291,6 +291,8 @@ impl Ui {
                 state.layout.y += offset.y;
             }
         }
+
+        size
     }
 }
 
@@ -642,16 +644,33 @@ You can ignore the return value otherwise."]
             root: impl FnOnce() -> E + Send + 'static
         ) -> WindowId {
             let id = WindowId::new();
-            let make_ui = Box::new(move |theme, surface, rt_handle, task_send, client_send| {
+            let make_ui = Box::new(move |theme, rt_handle, task_send, client_send| {
                 let root = root();
 
-                Ui::new(id, surface, rt_handle, task_send, client_send, theme, root)
+                Ui::new(id, rt_handle, task_send, client_send, theme, root)
             });
+
+            let config = match window.into() {
+                Window::Bar(bar) => WindowConfig::LayerShell(bar.into()),
+                Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
+                Window::Popup(popup) => {
+                    let parent = self.window_id()
+                        .get_surface()
+                        .expect("attempting to open a popup during Ui init");
+
+                    WindowConfig::Popup(
+                        PopupWindowConfig {
+                            parent,
+                            size: popup.size
+                        }
+                    )
+                }
+            };
 
             self.ui.client_send.send(UiRequest {
                 id,
                 action: WindowAction::Open {
-                    config: window.into().into_config(&self.ui.surface),
+                    config,
                     make_ui
                 }
             }).unwrap();

@@ -16,20 +16,19 @@ use smithay_client_toolkit::{
 
 use super::{
     wayland_window::{WaylandWindow, State, WindowSurface},
-    WindowEvent
+    WindowEvent, WindowDimensions
 };
-use crate::ui::UiEvent;
+use crate::{ui::{Ui, UiEvent}, Size};
 
 pub struct LayerShellWindowState {
-    surface: LayerSurface,
-    desired_size: (u32, u32)
+    surface: LayerSurface
 }
 
 #[derive(Debug)]
 pub struct LayerShellWindowConfig {
     pub anchor: Anchor,
     pub layer: Layer,
-    pub desired_size: (u32, u32),
+    pub size: WindowDimensions,
     pub exclusive_zone: Option<i32>
 }
 
@@ -40,7 +39,8 @@ impl WaylandWindow for LayerShellWindowState {
         config: Self::Config,
         globals: &GlobalList,
         queue_handle: &QueueHandle<State<Self>>,
-        surface: WlSurface
+        surface: WlSurface,
+        ui: &mut Ui
     ) -> (Self, WindowSurface) {
         let layer_shell = LayerShell::bind(&globals, &queue_handle)
             .expect("Compositor does not support the zwlr_layer_shell_v1 protocol.");
@@ -53,8 +53,15 @@ impl WaylandWindow for LayerShellWindowState {
             None
         );
 
-        surface.set_size(config.desired_size.0, config.desired_size.1);
         surface.set_anchor(config.anchor);
+
+        match config.size {
+            WindowDimensions::Fixed(size) => surface.set_size(size.0, size.1),
+            WindowDimensions::Auto(max) => {
+                let size = ui.layout(Size::new(max.0 as f32, max.1 as f32));
+                surface.set_size(size.width.round() as u32, size.height.round() as u32);
+            }
+        }
 
         if let Some(zone) = config.exclusive_zone {
             surface.set_exclusive_zone(zone);
@@ -63,8 +70,7 @@ impl WaylandWindow for LayerShellWindowState {
         surface.commit();
 
         let state = LayerShellWindowState {
-            surface: surface.clone(),
-            desired_size: config.desired_size
+            surface: surface.clone()
         };
 
         (state, WindowSurface::LayerShellSurface(surface))
@@ -89,19 +95,28 @@ impl LayerShellHandler for State<LayerShellWindowState> {
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        let size = if configure.new_size.0 == 0 || configure.new_size.1 == 0 {
-            self.window.desired_size
+        let current_size = self.monitor.surface_info.logical_size;
+        let width = if configure.new_size.0 == 0 {
+            current_size.0
         } else {
-            configure.new_size
+            configure.new_size.0
         };
 
-        if self.monitor.viewport.logical_size != size {
-            self.monitor.viewport.logical_size = size;
-            self.window.surface.set_size(size.0, size.1);
+        let height = if configure.new_size.1 == 0 {
+            current_size.1
+        } else {
+            configure.new_size.1
+        };
+
+        let new_size = (width, height);
+
+        if current_size != new_size {
+            self.monitor.surface_info.logical_size = new_size;
+            self.window.surface.set_size(new_size.0, new_size.1);
             self.window.surface.commit();
 
             self.buffer = None;
-            self.pending_events.push(UiEvent::Window(WindowEvent::Resize(size)));
+            self.pending_events.push(UiEvent::Window(WindowEvent::Resize(new_size)));
         }
     }
 }
