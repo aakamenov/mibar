@@ -52,7 +52,7 @@ impl WaylandWindow for PopupWindowState {
         queue_handle: &QueueHandle<State<Self>>,
         surface: WlSurface,
         ui: &mut Ui
-    ) -> (Self, WindowSurface) {
+    ) -> Self {
         let shell = XdgShell::bind(globals, queue_handle)
             .expect("xdg shell is not available");
 
@@ -68,6 +68,7 @@ impl WaylandWindow for PopupWindowState {
 
         positioner.set_offset(0, 0);
         positioner.set_anchor(Anchor::BottomLeft);
+        positioner.set_anchor_rect(0, 10, 200, 200);
 
         let popup = match config.parent {
             WindowSurface::LayerShellSurface(parent) => {
@@ -95,9 +96,17 @@ impl WaylandWindow for PopupWindowState {
 
         popup.wl_surface().commit();
 
-        let popup_clone = popup.clone();
+        Self { popup }
+    }
 
-        (Self { popup }, WindowSurface::XdgPopup(popup_clone))
+    #[inline]
+    fn window_surface(&self) -> WindowSurface {
+        WindowSurface::XdgPopup(self.popup.clone())
+    }
+
+    #[inline]
+    fn wl_surface(&self) -> &WlSurface {
+        self.popup.wl_surface()
     }
 }
 
@@ -128,9 +137,13 @@ impl PopupHandler for State<PopupWindowState> {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _popup: &SctkPopup,
+        popup: &SctkPopup,
         config: PopupConfigure
     ) {
+        if *popup != self.window.popup {
+            return;
+        }
+
         if !matches!(config.kind, ConfigureKind::Initial) {
             return;
         }
@@ -143,10 +156,12 @@ impl PopupHandler for State<PopupWindowState> {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _popup: &SctkPopup
+        popup: &SctkPopup
     ) {
-        println!("closing popup");
-        self.close = true;
+        if *popup == self.window.popup {
+            println!("closing popup");
+            self.close = true;
+        }
     }
 }
 

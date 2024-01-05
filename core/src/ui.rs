@@ -655,7 +655,7 @@ You can ignore the return value otherwise."]
                 Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
                 Window::Popup(popup) => {
                     let parent = self.window_id()
-                        .get_surface()
+                        .surface()
                         .expect("attempting to open a popup during Ui init");
 
                     WindowConfig::Popup(

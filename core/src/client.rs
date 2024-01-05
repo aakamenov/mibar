@@ -6,7 +6,10 @@ use std::{
 };
 
 use nohash::{self, IntMap};
-use smithay_client_toolkit::reexports::calloop::channel::{Sender, channel};
+use smithay_client_toolkit::reexports::{
+    calloop::channel::{Sender, channel},
+    client::Connection
+};
 use tokio::{
     runtime,
     sync::mpsc::{UnboundedSender, unbounded_channel}
@@ -68,6 +71,7 @@ pub fn run<E: Element>(
     root: impl FnOnce() -> E + Send + 'static,
     mut theme: Theme
 ) {
+    let conn = Connection::connect_to_env().unwrap();
     let runtime = builder.build().unwrap();
 
     let mut windows = IntMap::default();
@@ -103,6 +107,7 @@ pub fn run<E: Element>(
                     let rt_handle = runtime.handle().clone();
                     let ui_send = ui_send.clone();
                     let theme = theme.clone();
+                    let conn = conn.clone();
 
                     thread::spawn(move || {
                         match config {
@@ -113,7 +118,8 @@ pub fn run<E: Element>(
                                     make_ui,
                                     theme,
                                     rt_handle,
-                                    ui_send
+                                    ui_send,
+                                    conn
                                 ).run();
                             }
                             WindowConfig::Popup(popup) => {
@@ -123,7 +129,8 @@ pub fn run<E: Element>(
                                     make_ui,
                                     theme,
                                     rt_handle,
-                                    ui_send
+                                    ui_send,
+                                    conn
                                 ).run();
                             }
                         }
@@ -186,7 +193,7 @@ impl WindowId {
     }
 
     #[inline]
-    pub(crate) fn get_surface(&self) -> Option<WindowSurface> {
+    pub(crate) fn surface(&self) -> Option<WindowSurface> {
         WINDOWS.read().unwrap().iter()
             .find(|x| x.id == *self)
             .map(|x| x.surface.clone())
