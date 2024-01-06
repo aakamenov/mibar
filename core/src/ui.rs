@@ -102,7 +102,7 @@ pub(crate) struct UiCtx {
     // as opposed to synchronizing access every time we want to read it which
     // occurs multiple times per UI re-draw.
     theme: Theme,
-    mouse_pos: Point,
+    mouse_pos: Option<Point>,
     widgets: IntMap<WidgetId, WidgetState>,
     id_counter: u64,
     needs_redraw: bool,
@@ -133,7 +133,7 @@ impl Ui {
         let mut ctx = UiCtx {
             renderer: Renderer::new(),
             theme,
-            mouse_pos: Point::new(-1f32, -1f32),
+            mouse_pos: None,
             widgets: IntMap::default(),
             // We start from 1 because we use 0 just below as a fake ID
             // in order to begin building the widget tree. Thus, the root
@@ -195,8 +195,12 @@ impl Ui {
     }
 
     pub fn event(&mut self, event: Event) {
-        if let Event::Mouse(MouseEvent::MouseMove(pos)) = event {
-            self.ctx.mouse_pos = pos;
+        match event {
+            Event::Mouse(MouseEvent::MouseMove(pos)) =>
+                self.ctx.mouse_pos = Some(pos),
+            Event::Mouse(MouseEvent::LeaveWindow) =>
+                self.ctx.mouse_pos = None,
+            _ => { }
         }
 
         let mut ctx = UpdateCtx {
@@ -414,11 +418,6 @@ impl<'a> UpdateCtx<'a> {
     }
 
     #[inline]
-    pub fn is_hovered(&self) -> bool {
-        self.layout().contains(self.ui.mouse_pos)
-    }
-
-    #[inline]
     pub fn message<E: Element>(&mut self, id: &TypedId<E>, msg: E::Message) {
         let state = self.ui.widgets.get_mut(&id.inner())
             .unwrap() as *mut WidgetState;
@@ -488,11 +487,6 @@ impl<'a> DrawCtx<'a> {
 
             self.layout = prev;
         }
-    }
-
-    #[inline]
-    pub fn is_hovered(&self) -> bool {
-        self.layout.contains(self.ui.mouse_pos)
     }
 
     #[inline]
@@ -645,9 +639,7 @@ You can ignore the return value otherwise."]
         ) -> WindowId {
             let id = WindowId::new();
             let make_ui = Box::new(move |theme, rt_handle, task_send, client_send| {
-                let root = root();
-
-                Ui::new(id, rt_handle, task_send, client_send, theme, root)
+                Ui::new(id, rt_handle, task_send, client_send, theme, root())
             });
 
             let config = match window.into() {
@@ -706,14 +698,30 @@ impl_context_method! {
     UpdateCtx<'_>,
     DrawCtx<'_>,
     {
+        /// `None` means the mouse is currently outside the window.
         #[inline]
-        pub fn mouse_pos(&self) -> Point {
+        pub fn mouse_pos(&self) -> Option<Point> {
             self.ui.mouse_pos
         }
 
         #[inline]
         pub fn theme(&self) -> &Theme {
             &self.ui.theme
+        }
+    }
+}
+
+impl_context_method! {
+    UpdateCtx<'_>,
+    DrawCtx<'_>,
+    {
+        #[inline]
+        pub fn is_hovered(&self) -> bool {
+            if let Some(pos) = self.ui.mouse_pos {
+                self.layout().contains(pos)
+            } else {
+                false
+            }
         }
     }
 }

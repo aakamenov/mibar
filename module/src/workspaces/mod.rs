@@ -69,7 +69,7 @@ impl Widget for WorkspacesWidget {
 
     fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
         if let Event::Mouse(MouseEvent::Scroll(delta)) = event {
-            if ctx.layout().contains(ctx.mouse_pos()) {
+            if ctx.is_hovered() {
                 let y = delta.values().y;
                 if y > 0f32 {
                     let _ = ctx.task_void(hyprland::move_workspace_next());
