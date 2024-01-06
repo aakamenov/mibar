@@ -203,6 +203,7 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
         }
 
         self.state.ui.ctx.window_id().kill();
+        self.state.ui.destroy();
     }
 
     fn draw(&mut self) {

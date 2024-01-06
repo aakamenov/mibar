@@ -248,6 +248,10 @@ impl Ui {
         self.ctx.renderer.render(pixmap);
     }
 
+    pub fn destroy(mut self) {
+        self.ctx.dealloc(self.root);
+    }
+
     #[inline]
     pub fn needs_redraw(&self) -> bool {
         self.ctx.needs_redraw
