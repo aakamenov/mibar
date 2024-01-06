@@ -1,3 +1,5 @@
+use std::ptr;
+
 use smithay_client_toolkit::{
     reexports::{
         calloop_wayland_source::WaylandSource,
@@ -222,9 +224,9 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
             logical_size.1 * scale_factor
         );
 
+        let format = Format::Argb8888;
         let stride = width as i32 * 4;
 
-        let format = Format::Argb8888;
         let buffer = self.state.buffer.get_or_insert_with(|| {
             self.state.pool
                 .create_buffer(width as i32, height as i32, stride, format)
@@ -251,6 +253,13 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
             }
         };
 
+        // Zero out buffer, otherwise we are drawing on top of the previous frame
+        // which causes issues when there is transparency.
+        // Using ptr::write_bytes() instead of canvas.fill() is ~270x faster in debug here X.X
+        unsafe {
+            ptr::write_bytes(canvas.as_mut_ptr(), 0, canvas.len());
+        }
+        
         let mut pixmap = PixmapMut::from_bytes(
             canvas,
             width,
