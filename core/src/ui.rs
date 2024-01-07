@@ -22,7 +22,7 @@ use crate::{
     draw::TextInfo,
     renderer::Renderer,
     wayland::{
-        popup::PopupWindowConfig,
+        popup::{self, PopupWindowConfig},
         WindowEvent, MouseEvent, WindowConfig
     },
     client::{UiRequest, WindowId, WindowAction},
@@ -468,6 +468,64 @@ impl<'a> UpdateCtx<'a> {
         self.ui.needs_layout = true;
         self.ui.needs_redraw = true;
     }
+
+    pub fn open_window<E: Element>(
+        &self,
+        window: impl Into<Window>,
+        root: impl FnOnce() -> E + Send + 'static
+    ) -> WindowId {
+        let id = WindowId::new();
+        let make_ui = Box::new(move |theme, rt_handle, task_send, client_send| {
+            Ui::new(id, rt_handle, task_send, client_send, theme, root())
+        });
+
+        let config = match window.into() {
+            Window::Bar(bar) => WindowConfig::LayerShell(bar.into()),
+            Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
+            Window::Popup(popup) => {
+                let parent = self.window_id()
+                    .surface()
+                    .expect("attempting to open a popup during Ui init");
+
+                let pos = self.mouse_pos();
+                let anchor_rect = match popup.location {
+                    popup::Location::Cursor if pos.is_some()  => {
+                        let pos = pos.unwrap();
+
+                        Rect::new(pos.x, pos.y, 1f32, 1f32)
+                    }
+                    popup::Location::WidgetBounds | popup::Location::Cursor =>
+                        self.layout(),
+                    popup::Location::Bounds(rect) => rect
+                };
+
+                WindowConfig::Popup(
+                    PopupWindowConfig {
+                        parent,
+                        size: popup.size,
+                        anchor: popup.anchor,
+                        anchor_rect
+                    }
+                )
+            }
+        };
+
+        self.ui.client_send.send(UiRequest {
+            id,
+            action: WindowAction::Open {
+                config,
+                make_ui
+            }
+        }).unwrap();
+
+        id
+    }
+
+    pub fn close_window(&self, id: WindowId) {
+        self.ui.client_send.send(
+            UiRequest { id, action: WindowAction::Close }
+        ).unwrap();
+    }
 }
 
 impl<'a> DrawCtx<'a> {
@@ -634,50 +692,6 @@ You can ignore the return value otherwise."]
         #[inline]
         pub fn window_id(&self) -> WindowId {
             self.ui.window_id()
-        }
-
-        pub fn open_window<E: Element>(
-            &self,
-            window: impl Into<Window>,
-            root: impl FnOnce() -> E + Send + 'static
-        ) -> WindowId {
-            let id = WindowId::new();
-            let make_ui = Box::new(move |theme, rt_handle, task_send, client_send| {
-                Ui::new(id, rt_handle, task_send, client_send, theme, root())
-            });
-
-            let config = match window.into() {
-                Window::Bar(bar) => WindowConfig::LayerShell(bar.into()),
-                Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
-                Window::Popup(popup) => {
-                    let parent = self.window_id()
-                        .surface()
-                        .expect("attempting to open a popup during Ui init");
-
-                    WindowConfig::Popup(
-                        PopupWindowConfig {
-                            parent,
-                            size: popup.size
-                        }
-                    )
-                }
-            };
-
-            self.ui.client_send.send(UiRequest {
-                id,
-                action: WindowAction::Open {
-                    config,
-                    make_ui
-                }
-            }).unwrap();
-
-            id
-        }
-
-        pub fn close_window(&self, id: WindowId) {
-            self.ui.client_send.send(
-                UiRequest { id, action: WindowAction::Close }
-            ).unwrap();
         }
 
         pub(crate) fn load_asset(&self, source: impl Into<AssetSource>) {

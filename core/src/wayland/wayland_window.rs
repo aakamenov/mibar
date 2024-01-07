@@ -346,6 +346,10 @@ impl<W: WaylandWindow> OutputHandler for State<W> {
         output: WlOutput
     ) {
         println!("Update output: {:?}", output);
+
+        if self.monitor.output.is_none() {
+            self.monitor.output = Some(output);
+        }
     }
 
     fn output_destroyed(
@@ -356,6 +360,7 @@ impl<W: WaylandWindow> OutputHandler for State<W> {
     ) {
         if self.monitor.output.as_ref().map_or(false, |x| *x == output) {
             self.monitor.output = None;
+            self.buffer = None;
         }
     }
 }
