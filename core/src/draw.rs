@@ -40,8 +40,8 @@ pub struct Circle {
 }
 
 #[derive(Clone, Debug)]
-pub struct TextInfo {
-    pub text: String,
+pub struct TextInfo<'a> {
+    pub text: &'a str,
     pub size: f32,
     pub line_height: LineHeight,
     pub font: Font
@@ -172,6 +172,32 @@ impl Circle {
     ) -> Self {
         self.border_width = width;
         self.border_color = color.into();
+
+        self
+    }
+}
+
+impl<'a> TextInfo<'a> {
+    #[inline]
+    pub fn new(text: &'a str, size: f32) -> Self {
+        Self {
+            text,
+            size,
+            line_height: LineHeight::default(),
+            font: Font::default()
+        }
+    }
+
+    #[inline]
+    pub fn with_font(mut self, font: Font) -> Self {
+        self.font = font;
+
+        self
+    }
+
+    #[inline]
+    pub fn with_line_height(mut self, height: LineHeight) -> Self {
+        self.line_height = height;
 
         self
     }

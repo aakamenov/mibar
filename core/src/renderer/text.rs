@@ -17,8 +17,7 @@ use cosmic_text::{
 
 use crate::{
     geometry::Size,
-    theme::Font,
-    draw::{TextInfo, LineHeight}
+    draw::TextInfo
 };
 
 const GLYPH_CACHE_SIZE: usize = 64;
@@ -251,32 +250,6 @@ impl CachedGlyphKey {
         let color = [color.red(), color.green(), color.blue()];
 
         Self { swash_key, color }
-    }
-}
-
-impl TextInfo {
-    #[inline]
-    pub fn new(text: impl Into<String>, size: f32) -> Self {
-        Self {
-            text: text.into(),
-            size,
-            line_height: LineHeight::default(),
-            font: Font::default()
-        }
-    }
-
-    #[inline]
-    pub fn with_font(mut self, font: Font) -> Self {
-        self.font = font;
-
-        self
-    }
-
-    #[inline]
-    pub fn with_line_height(mut self, height: LineHeight) -> Self {
-        self.line_height = height;
-
-        self
     }
 }
 

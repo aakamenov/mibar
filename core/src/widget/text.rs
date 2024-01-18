@@ -1,7 +1,7 @@
 use crate::{
     geometry::Size,
     ui::{InitCtx, DrawCtx, LayoutCtx, UpdateCtx},
-    draw::TextInfo,
+    draw::{TextInfo, LineHeight},
     theme::Font,
     color::Color
 };
@@ -13,6 +13,7 @@ pub struct Text {
     text: String,
     text_size: Option<f32>,
     font: Option<Font>,
+    line_height: Option<LineHeight>,
     style: Option<StyleFn>
 }
 
@@ -26,7 +27,10 @@ pub enum Message {
 
 #[derive(Debug)]
 pub struct State {
-    info: TextInfo,
+    text: String,
+    text_size: f32,
+    font: Font,
+    line_height: LineHeight,
     style: Option<StyleFn>
 }
 
@@ -37,6 +41,7 @@ impl Text {
             text: text.into(),
             text_size: None,
             font: None,
+            line_height: None,
             style: None
         }
     }
@@ -44,6 +49,13 @@ impl Text {
     #[inline]
     pub fn text_size(mut self, size: f32) -> Self {
         self.text_size = Some(size);
+
+        self
+    }
+
+    #[inline]
+    pub fn line_height(mut self, line_height: LineHeight) -> Self {
+        self.line_height = Some(line_height);
 
         self
     }
@@ -72,17 +84,14 @@ impl Element for Text {
         <Self::Widget as Widget>::State
     ) {
         let theme = ctx.theme();
-        let info = TextInfo::new(
-            self.text,
-            self.text_size.unwrap_or(theme.font_size),
-        ).with_font(
-            self.font.unwrap_or(theme.font)
-        );
 
         (
             TextWidget,
             State {
-                info,
+                text: self.text,
+                text_size: self.text_size.unwrap_or(theme.font_size),
+                font: self.font.unwrap_or(theme.font),
+                line_height: self.line_height.unwrap_or_default(),
                 style: self.style
             }
         )
@@ -95,8 +104,8 @@ impl Element for Text {
     ) {
         match msg {
             Message::SetText(text) => {
-                if text != state.info.text {
-                    state.info.text = text;
+                if text != state.text {
+                    state.text = text;
                     ctx.request_layout();
                 }
             }
@@ -116,7 +125,14 @@ impl Widget for TextWidget {
         ctx: &mut LayoutCtx,
         bounds: SizeConstraints
     ) -> Size {
-        bounds.constrain(ctx.measure_text(&state.info, bounds.max))
+        let info = TextInfo {
+            text: &state.text,
+            size: state.text_size,
+            line_height: state.line_height,
+            font: state.font
+        };
+
+        bounds.constrain(ctx.measure_text(&info, bounds.max))
     }
 
     fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
@@ -127,6 +143,13 @@ impl Widget for TextWidget {
         };
         
         let rect = ctx.layout();
-        ctx.renderer().fill_text(&state.info, rect, color);
+        let info = TextInfo {
+            text: &state.text,
+            size: state.text_size,
+            line_height: state.line_height,
+            font: state.font
+        };
+
+        ctx.renderer().fill_text(&info, rect, color);
     }
 }

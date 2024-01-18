@@ -20,10 +20,10 @@ pub struct ButtonWidget;
 
 pub struct State {
     id: u8,
+    text: String,
     is_active: bool,
     is_hovered: bool,
-    text_info: TextInfo,
-    text_size: Size,
+    text_dimensions: Size,
     status: WorkspaceStatus,
     style: StyleFn
 }
@@ -60,17 +60,16 @@ impl Element for Button {
     type Widget = ButtonWidget;
     type Message = WorkspaceStatus;
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, _ctx: &mut InitCtx) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
         let state = State {
             id: self.id,
+            text: String::from("0"),
             is_active: false,
             is_hovered: false,
-            text_info: TextInfo::new("0", TEXT_SIZE)
-                .with_font(ctx.theme().font),
-            text_size: Size::ZERO,
+            text_dimensions: Size::ZERO,
             status: WorkspaceStatus::default(),
             style: self.style
         };
@@ -90,7 +89,7 @@ impl Element for Button {
 
         if msg.num_windows != state.status.num_windows {
             state.status.num_windows = msg.num_windows;
-            state.text_info.text = msg.num_windows.to_string();
+            state.text = msg.num_windows.to_string();
             ctx.request_layout();
         }
     }
@@ -107,7 +106,10 @@ impl Widget for ButtonWidget {
         let diameter = RADIUS * 2f32;
         let size = Size::new(diameter, diameter);
 
-        state.text_size = ctx.measure_text(&state.text_info, size);
+        let info = TextInfo::new(&state.text, TEXT_SIZE)
+            .with_font(ctx.theme().font);
+
+        state.text_dimensions = ctx.measure_text(&info, size);
 
         bounds.constrain(size)
     }
@@ -204,12 +206,15 @@ impl Widget for ButtonWidget {
         );
 
         if (has_windows || state.status.is_current) && !state.is_active {
-            let mut rect = Rect::from_size(state.text_size);
+            let mut rect = Rect::from_size(state.text_dimensions);
             rect.x = center.x - (rect.width / 2f32);
             rect.y = center.y - (rect.height / 2f32);
     
+            let info = TextInfo::new(&state.text, TEXT_SIZE)
+                .with_font(ctx.theme().font);
+
             ctx.renderer().fill_text(
-                &state.text_info,
+                &info,
                 rect,
                 if state.status.is_current {
                     style.selected_text_color

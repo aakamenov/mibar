@@ -2,7 +2,7 @@ use mibar_core::{
     widget::{SizeConstraints, Element, Widget},
     Size, Rect, InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
     ValueSender, TextInfo, Color, Quad, Background,
-    Weight
+    Weight, Font
 };
 
 use tokio::{
@@ -29,8 +29,9 @@ pub struct BatteryWidget;
 
 pub struct State {
     info: BatteryInfoState,
-    text_info: TextInfo,
-    text_size: Size,
+    text: String,
+    font: Font,
+    text_dimensions: Size,
     style: StyleFn,
     handle: JoinHandle<()>
 }
@@ -109,9 +110,9 @@ impl Element for Battery {
         let state = State {
             info: BatteryInfoState::InitialRead,
             style: self.style,
-            text_info: TextInfo::new("0", TEXT_SIZE)
-                .with_font(font),
-            text_size: Size::ZERO,
+            text: String::from("0"),
+            font,
+            text_dimensions: Size::ZERO,
             handle
         };
 
@@ -125,7 +126,10 @@ impl Widget for BatteryWidget {
     fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
         let size = match state.info {
             BatteryInfoState::Info { .. } | BatteryInfoState::Error => {
-                state.text_size = ctx.measure_text(&state.text_info, BODY_SIZE);
+                let info = TextInfo::new(&state.text, TEXT_SIZE)
+                    .with_font(state.font);
+
+                state.text_dimensions = ctx.measure_text(&info, BODY_SIZE);
 
                 let mut size = BODY_SIZE;
                 size.width += TERMINAL_SIZE.width;
@@ -153,13 +157,13 @@ impl Widget for BatteryWidget {
             BatteryInfoState::Info { capacity, status } => {
                 match status {
                     battery::Status::Charging =>
-                        state.text_info.text = "󱐋".into(),
+                        state.text = "󱐋".into(),
                     battery::Status::Full | battery::Status::Discharging =>
-                        state.text_info.text = capacity.to_string()
+                        state.text = capacity.to_string()
                 }
             }
             BatteryInfoState::Error => {
-                state.text_info.text = "N/A".into();
+                state.text = "N/A".into();
             }
             BatteryInfoState::InitialRead => unreachable!()
         }
@@ -206,12 +210,15 @@ impl Widget for BatteryWidget {
 
         ctx.renderer().fill_quad(Quad::new(fill, style.background));
 
-        let mut text_rect = Rect::from_size(state.text_size);
+        let mut text_rect = Rect::from_size(state.text_dimensions);
         text_rect.x = body_center.x - (text_rect.width / 2f32);
         text_rect.y = body_center.y - (text_rect.height / 2f32);
 
+        let info = TextInfo::new(&state.text, TEXT_SIZE)
+            .with_font(state.font);
+
         ctx.renderer().fill_text(
-            &state.text_info,
+            &info,
             text_rect,
             style.text
         );
