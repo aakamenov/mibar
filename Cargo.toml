@@ -24,3 +24,4 @@ mibar = { path = "." }
 mibar-core = { path = "core" }
 mibar-module = { path = "module" }
 tokio = { version = "1.35.1", default-features = false, features = ["full"] }
+smallvec = { version = "1.11.2", default-features = false, features = ["const_new", "union"]}

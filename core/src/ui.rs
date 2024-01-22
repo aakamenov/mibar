@@ -9,9 +9,10 @@ use std::{
 };
 
 use tiny_skia::PixmapMut;
-use nohash::IntMap;
 use tokio::{runtime, task::JoinHandle, sync::mpsc::UnboundedSender};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
+use slotmap::{SlotMap, SecondaryMap, Key, new_key_type};
+use smallvec::SmallVec;
 
 use crate::{
     geometry::{Rect, Size, Point},
@@ -30,16 +31,14 @@ use crate::{
     asset_loader::{self, AssetSource}
 };
 
-type WidgetId = u64;
-
 pub struct TaskResult {
-    id: WidgetId,
+    id: RawWidgetId,
     data: Box<dyn Any + Send>
 }
 
 #[derive(Clone, Debug)]
 pub struct ValueSender<T: Send> {
-    id: WidgetId,
+    id: RawWidgetId,
     sender: Sender<TaskResult>,
     phantom: PhantomData<T>
 }
@@ -55,7 +54,7 @@ pub struct TypedId<E: Element> {
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
-pub struct Id(WidgetId);
+pub struct Id(RawWidgetId);
 
 pub struct LayoutCtx<'a> {
     ui: &'a mut UiCtx
@@ -68,12 +67,12 @@ pub struct DrawCtx<'a> {
 
 pub struct UpdateCtx<'a> {
     ui: &'a mut UiCtx,
-    current: WidgetId
+    current: RawWidgetId
 }
 
 pub struct InitCtx<'a> {
     pub(crate) ui: &'a mut UiCtx,
-    current: WidgetId
+    current: RawWidgetId
 }
 
 #[derive(Debug)]
@@ -103,16 +102,21 @@ pub(crate) struct UiCtx {
     // occurs multiple times per UI re-draw.
     theme: Theme,
     mouse_pos: Option<Point>,
-    widgets: IntMap<WidgetId, WidgetState>,
-    id_counter: u64,
+    widgets: SlotMap<RawWidgetId, WidgetState>,
     needs_redraw: bool,
     needs_layout: bool,
-    parent_to_children: IntMap<WidgetId, Vec<WidgetId>>,
-    child_to_parent: IntMap<WidgetId, WidgetId>,
+    parent_to_children: SecondaryMap<RawWidgetId, SmallVec<[RawWidgetId; 4]>>,
+    child_to_parent: SecondaryMap<RawWidgetId, RawWidgetId>,
     rt_handle: runtime::Handle,
     task_send: Sender<TaskResult>,
     client_send: UnboundedSender<UiRequest>,
     window_id: WindowId
+}
+
+new_key_type! {
+    /// Internal id that unlike `Id` or `TypedId` (which wrap around it and disable Copy/Clone)
+    /// doesn't track widget lifetimes. Should be used with great care!!!
+    pub(crate) struct RawWidgetId;
 }
 
 struct WidgetState {
@@ -134,16 +138,11 @@ impl Ui {
             renderer: Renderer::new(),
             theme,
             mouse_pos: None,
-            widgets: IntMap::default(),
-            // We start from 1 because we use 0 just below as a fake ID
-            // in order to begin building the widget tree. Thus, the root
-            // widget will have an ID of 1 and in practice we never use 0
-            // after that, when walking the tree.
-            id_counter: 1,
+            widgets: SlotMap::with_capacity_and_key(20),
             needs_redraw: false,
             needs_layout: false,
-            parent_to_children: IntMap::default(),
-            child_to_parent: IntMap::default(),
+            parent_to_children: SecondaryMap::new(),
+            child_to_parent: SecondaryMap::new(),
             rt_handle,
             task_send,
             client_send,
@@ -151,7 +150,7 @@ impl Ui {
         };
 
         let mut init_ctx = InitCtx {
-            current: 0,
+            current: RawWidgetId::null(),
             ui: &mut ctx
         };
 
@@ -213,7 +212,7 @@ impl Ui {
 
     pub fn task_result(&mut self, result: TaskResult) {
         // Widget might have been removed while the task was executing.
-        let Some(state) = self.ctx.widgets.get_mut(&result.id) else {
+        let Some(state) = self.ctx.widgets.get_mut(result.id) else {
             return;
         };
 
@@ -287,13 +286,13 @@ impl Ui {
 
         while let Some(current) = queue.pop_front() {
             // The entry will be None when we reach a leaf node.
-            let children = self.ctx.parent_to_children.entry(current).or_default();
+            let children = self.ctx.parent_to_children.entry(current).unwrap().or_default();
             queue.extend(children.iter());
 
-            let offset = self.ctx.widgets[&current].layout.origin();
+            let offset = self.ctx.widgets[current].layout.origin();
             
             for child in children {
-                let state = self.ctx.widgets.get_mut(child).unwrap();
+                let state = self.ctx.widgets.get_mut(*child).unwrap();
     
                 state.layout.x += offset.x;
                 state.layout.y += offset.y;
@@ -311,17 +310,17 @@ impl UiCtx {
     }
 
     fn dealloc(&mut self, id: Id) {
-        let widget = self.widgets.remove(&id.0).unwrap();
+        let widget = self.widgets.remove(id.0).unwrap();
 
-        let parent = self.child_to_parent.remove(&id.0).unwrap();
-        let children = self.parent_to_children.get_mut(&parent).unwrap();
+        let parent = self.child_to_parent.remove(id.0).unwrap();
+        let children = self.parent_to_children.get_mut(parent).unwrap();
         let index = children.iter().position(|x| *x == id.0).unwrap();
 
         // Can't use swap_remove() because order is important
         children.remove(index);
 
         let children = self.parent_to_children
-            .remove(&id.0)
+            .remove(id.0)
             .unwrap_or_default();
 
         for child in children {
@@ -334,13 +333,13 @@ impl UiCtx {
         widget.widget.destroy(widget.state);
     }
 
-    fn dealloc_impl(&mut self, id: WidgetId) {
-        let widget = self.widgets.remove(&id).unwrap();
+    fn dealloc_impl(&mut self, id: RawWidgetId) {
+        let widget = self.widgets.remove(id).unwrap();
 
-        self.child_to_parent.remove(&id).unwrap();
+        self.child_to_parent.remove(id).unwrap();
 
         let children = self.parent_to_children
-            .remove(&id)
+            .remove(id)
             .unwrap_or_default();
 
         for child in children {
@@ -351,21 +350,13 @@ impl UiCtx {
         // they could be relying on the parent being alive during their
         // destroy() call (as is the case with StateHandle<T> in the State widget).
         widget.widget.destroy(widget.state);
-    }
-
-    #[inline]
-    fn next_id(&mut self) -> WidgetId {
-        let id = self.id_counter;
-        self.id_counter += 1;
-
-        id
     }
 }
 
 impl<'a> LayoutCtx<'a> {
     #[inline]
     pub fn layout(&mut self, id: impl Borrow<Id>, bounds: SizeConstraints) -> Size {
-        let state = self.ui.widgets.get_mut(&id.borrow().0)
+        let state = self.ui.widgets.get_mut(id.borrow().0)
             .unwrap() as *mut WidgetState;
 
         unsafe {
@@ -390,7 +381,7 @@ impl<'a> LayoutCtx<'a> {
         id: impl Borrow<Id>,
         func: impl FnOnce(&mut Rect)
     ) -> Rect {
-        let state = self.ui.widgets.get_mut(&id.borrow().0).unwrap();
+        let state = self.ui.widgets.get_mut(id.borrow().0).unwrap();
         func(&mut state.layout);
 
         state.layout
@@ -401,7 +392,7 @@ impl<'a> UpdateCtx<'a> {
     #[inline]
     pub fn event(&mut self, id: impl Borrow<Id>, event: &Event) {
         let id = id.borrow().0;
-        let state = self.ui.widgets.get_mut(&id)
+        let state = self.ui.widgets.get_mut(id)
             .unwrap() as *mut WidgetState;
 
         unsafe {
@@ -418,16 +409,16 @@ impl<'a> UpdateCtx<'a> {
 
     #[inline]
     pub fn layout(&self) -> Rect {
-        self.ui.widgets[&self.current].layout
+        self.ui.widgets[self.current].layout
     }
 
     #[inline]
     pub fn message<E: Element>(&mut self, id: &TypedId<E>, msg: E::Message) {
-        let state = self.ui.widgets.get_mut(&id.inner())
+        let state = self.ui.widgets.get_mut(id.raw())
             .unwrap() as *mut WidgetState;
 
         let prev = self.current;
-        self.current = id.inner();
+        self.current = id.raw();
 
         unsafe {
             let state = &mut (*state);
@@ -521,10 +512,19 @@ impl<'a> UpdateCtx<'a> {
         id
     }
 
+    #[inline]
     pub fn close_window(&self, id: WindowId) {
         self.ui.client_send.send(
             UiRequest { id, action: WindowAction::Close }
         ).unwrap();
+    }
+
+    #[inline]
+    pub fn as_init_ctx<'b: 'a>(&'b mut self) -> InitCtx<'a> {
+        InitCtx {
+            current: self.current,
+            ui: self.ui
+        }
     }
 }
 
@@ -536,7 +536,7 @@ impl<'a> DrawCtx<'a> {
 
     #[inline]
     pub fn draw(&mut self, id: impl Borrow<Id>) {
-        let state = self.ui.widgets.get_mut(&id.borrow().0)
+        let state = self.ui.widgets.get_mut(id.borrow().0)
             .unwrap() as *mut WidgetState;
 
         unsafe {
@@ -561,7 +561,10 @@ impl<'a> InitCtx<'a> {
     pub fn new_child<E: Element>(&mut self, el: E) -> TypedId<E>
         where E::Widget: AnyWidget
     {
-        let child = self.ui.next_id();
+        // Hack, so we can get a key from the SlotMap
+        let child = self.ui.widgets.insert(
+            WidgetState::new(Box::new(null_widget::NullWidget), Box::new(null_widget::State))
+        );
 
         let parent = self.current;
         self.current = child;
@@ -571,12 +574,17 @@ impl<'a> InitCtx<'a> {
         self.current = parent;
 
         let state = WidgetState::new(Box::new(widget), Box::new(state));
-        self.ui.widgets.insert(child, state);
+        self.ui.widgets[child] = state;
 
         self.ui.child_to_parent.insert(child, parent);
-        self.ui.parent_to_children.entry(parent)
-            .or_default()
-            .push(child);
+
+        match self.ui.parent_to_children.entry(parent) {
+            Some(entry) => entry.or_default().push(child),
+            None => {
+                // We've reached the root widget which has no parent.
+                assert_eq!(parent, RawWidgetId::null());
+            }
+        }
 
         TypedId {
             id: Id(child),
@@ -757,7 +765,7 @@ impl WidgetState {
 
 impl<T: Send + 'static> ValueSender<T> {
     #[inline]
-    fn new(id: WidgetId, sender: Sender<TaskResult>) -> Self {
+    fn new(id: RawWidgetId, sender: Sender<TaskResult>) -> Self {
         Self {
             id,
             sender,
@@ -779,13 +787,13 @@ impl<T: Send + 'static> ValueSender<T> {
 impl<T: Send> Hash for ValueSender<T> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u64(self.id);
+        self.id.hash(state);
     }
 }
 
 impl<E: Element> TypedId<E> {
     #[inline]
-    fn inner(&self) -> WidgetId {
+    fn raw(&self) -> RawWidgetId {
         self.id.0
     }
 }
@@ -793,7 +801,7 @@ impl<E: Element> TypedId<E> {
 impl<E: Element> Into<Id> for TypedId<E> {
     #[inline]
     fn into(self) -> Id {
-        Id(self.inner())
+        Id(self.raw())
     }
 }
 
@@ -824,5 +832,42 @@ impl fmt::Debug for TaskResult {
             .field("id", &self.id)
             .field("data", &self.data)
             .finish()
+    }
+}
+
+// This is a hack which exists because you cannot reserve a key on a SlotMap but we
+// need to know the key before the new widget has been constructed. So we put this Null
+// widget in temporarily and then replace it with the actual widget once it has been
+// constructed. We use ZSTs so no allocations occur. We cannot use SlotMap::insert_with_key
+// because we are are passing the InitCtx down the tree.
+mod null_widget {
+    use super::*;
+
+    pub struct Null;
+    pub struct NullWidget;
+    pub struct State;
+
+    impl Element for Null {
+        type Widget = NullWidget;
+        type Message = ();
+
+        fn make_widget(self, _ctx: &mut InitCtx) -> (
+            Self::Widget,
+            <Self::Widget as Widget>::State
+        ) {
+            panic!("Called into null widget. This is a bug...");
+        }
+    }
+
+    impl Widget for NullWidget {
+        type State = State;
+
+        fn layout(_state: &mut Self::State, _ctx: &mut LayoutCtx, _bounds: SizeConstraints) -> Size {
+            panic!("Called into null widget. This is a bug...");
+        }
+
+        fn draw(_state: &mut Self::State, _ctx: &mut DrawCtx) {
+            panic!("Called into null widget. This is a bug...");
+        }
     }
 }
