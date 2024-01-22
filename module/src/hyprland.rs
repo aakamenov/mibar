@@ -646,9 +646,6 @@ fn hyprland_socket(ty: SocketType) -> Option<String> {
 
 impl<T> Drop for SubscriptionToken<T> {
     fn drop(&mut self) {
-        let mut map = self.handle.write().unwrap();
-        map.remove(&self.key);
-
         if SUB_COUNT.fetch_sub(1, Ordering::AcqRel) == 1 {
             let mut handle = HANDLE.lock().unwrap();
             if let Some(handle) = handle.as_mut() {
@@ -659,6 +656,9 @@ impl<T> Drop for SubscriptionToken<T> {
             drop(handle);
 
             drop_all_subs();
+        } else {
+            let mut map = self.handle.write().unwrap();
+            map.remove(&self.key);
         }
     }
 }
