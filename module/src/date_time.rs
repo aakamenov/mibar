@@ -6,7 +6,8 @@ use mibar_core::{
         text::{self, Text},
         Element, Widget, SizeConstraints
     },
-    Size, InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId
+    Size, Rect, InitCtx, DrawCtx, LayoutCtx,
+    UpdateCtx, TypedId, StateHandle
 };
 
 use crate::sys_info::Date;
@@ -88,11 +89,11 @@ impl Element for DateTime {
 impl Widget for DateTimeWidget {
     type State = State;
 
-    fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
-        ctx.layout(&state.text, bounds)
+    fn layout(handle: StateHandle<Self::State>, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+        ctx.layout(ctx.tree[handle].text, bounds)
     }
 
-    fn task_result(state: &mut Self::State, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
+    fn task_result(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
         let result = data.downcast::<(String, i32)>().unwrap();
 
         let remaining = result.1;
@@ -101,10 +102,10 @@ impl Widget for DateTimeWidget {
             get_time()
         });
 
-        ctx.message(&state.text, text::Message::SetText(result.0));
+        ctx.message(ctx.tree[handle].text, text::Message::SetText(result.0));
     }
 
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.draw(&state.text);
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {
+        ctx.draw(ctx.tree[handle].text);
     }
 }

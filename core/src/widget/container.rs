@@ -1,10 +1,8 @@
-use std::{borrow::Borrow, marker::PhantomData};
+use std::marker::PhantomData;
 
 use crate::{
-    geometry::Size,
-    ui::{InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId, Event},
-    draw::{Quad, QuadStyle},
-    Color, Id
+    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId, Event,
+    StateHandle, Size, Rect, Quad, QuadStyle, Color, Id
 };
 
 use super::{
@@ -125,11 +123,13 @@ impl<E: Element + 'static> Element for Container<E> {
     }
 
     fn message(
-        state: &mut <Self::Widget as Widget>::State,
+        handle: StateHandle<<Self::Widget as Widget>::State>,
         ctx: &mut UpdateCtx,
         msg: Self::Message
     ) {
-        ctx.message(&state.child, msg)
+        let child = ctx.tree[handle].child;
+
+        ctx.message(child, msg)
     }
 }
 
@@ -137,13 +137,15 @@ impl<E: Element + 'static> Widget for ContainerWidget<E> {
     type State = State<E>;
 
     fn layout(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut LayoutCtx,
         bounds: SizeConstraints
     ) -> Size {
+        let state = &ctx.tree[handle];
+
         layout_child(
             ctx,
-            state.child.borrow(),
+            state.child.into(),
             bounds,
             state.padding,
             state.width,
@@ -153,26 +155,26 @@ impl<E: Element + 'static> Widget for ContainerWidget<E> {
         )
     }
 
-    fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
-        ctx.event(&state.child, event);
+    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
+        ctx.event(ctx.tree[handle].child, event);
     }
 
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, rect: Rect) {
+        let state = &ctx.tree[handle];
+
         if let Some(style) = state.style {
             let style = style();
-
-            let rect = ctx.layout();
-            ctx.renderer().fill_quad(Quad { rect, style: style.quad });
+            ctx.renderer.fill_quad(Quad { rect, style: style.quad });
 
             if let Some(color) = style.text_color {
-                ctx.theme().push_text_color(color);
-                ctx.draw(&state.child);
-                ctx.theme().pop_text_color();
+                ctx.ui.theme().push_text_color(color);
+                ctx.draw(state.child);
+                ctx.ui.theme().pop_text_color();
             } else {
-                ctx.draw(&state.child);
+                ctx.draw(state.child);
             }
         } else {
-            ctx.draw(&state.child);
+            ctx.draw(state.child);
         }
     }
 }
@@ -180,7 +182,7 @@ impl<E: Element + 'static> Widget for ContainerWidget<E> {
 #[inline(always)]
 pub fn layout_child(
     ctx: &mut LayoutCtx,
-    child: &Id,
+    child: Id,
     bounds: SizeConstraints,
     padding: Padding,
     width: Length,

@@ -10,7 +10,7 @@ use tiny_skia::{
 };
 
 use crate::{
-    geometry::{Rect, Point},
+    geometry::{Rect, Point, Size},
     color::Color,
     draw::{Quad, Circle, BorderRadius, Background, TextInfo},
     asset_loader::AssetId
@@ -93,14 +93,8 @@ impl Renderer {
     }
 
     #[inline]
-    pub fn scale_factor(&mut self) -> f32 {
-        self.scale_factor
-    }
-    
-    #[inline]
-    pub fn set_scale_factor(&mut self, scale_factor: f32) {
-        self.scale_factor = scale_factor;
-        self.text_renderer.invalidate();
+    pub fn measure_text(&mut self, info: &TextInfo, size: Size) -> Size {
+        self.text_renderer.measure(info, size)
     }
 
     #[inline]
@@ -145,6 +139,17 @@ impl Renderer {
     #[inline]
     pub fn pop_clip(&mut self) {
         self.commands.push(Command::PopClip);
+    }
+
+    #[inline]
+    pub(crate) fn scale_factor(&mut self) -> f32 {
+        self.scale_factor
+    }
+    
+    #[inline]
+    pub(crate) fn set_scale_factor(&mut self, scale_factor: f32) {
+        self.scale_factor = scale_factor;
+        self.text_renderer.invalidate();
     }
 
     #[inline]

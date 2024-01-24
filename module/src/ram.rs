@@ -4,7 +4,7 @@ use mibar_core::{
         Element, Widget, SizeConstraints
     },
     InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
-    ValueSender, TypedId, Size
+    ValueSender, TypedId, Size, Rect, StateHandle
 };
 
 use tokio::task::JoinHandle;
@@ -52,7 +52,7 @@ impl Element for Ram {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let mut rx = sys_info::RAM.subscribe(ctx.runtime_handle());
+        let mut rx = sys_info::RAM.subscribe(ctx.ui.runtime_handle());
         let handle = ctx.task_with_sender(|sender: ValueSender<RamUsage>| {
             async move {
                 loop {
@@ -81,23 +81,23 @@ impl Element for Ram {
 impl Widget for RamWidget {
     type State = State;
 
-    fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
-        ctx.layout(&state.text, bounds)
+    fn layout(handle: StateHandle<Self::State>, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+        ctx.layout(ctx.tree[handle].text, bounds)
     }
 
     fn task_result(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut UpdateCtx,
         data: Box<dyn std::any::Any>
     ) {
         let usage = *data.downcast::<RamUsage>().unwrap();
         let text = format(usage);
 
-        ctx.message(&state.text, text::Message::SetText(text));
+        ctx.message(ctx.tree[handle].text, text::Message::SetText(text));
     }
 
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.draw(&state.text);
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {
+        ctx.draw(ctx.tree[handle].text);
     }
 
     fn destroy(state: Self::State) {

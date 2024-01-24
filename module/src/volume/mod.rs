@@ -12,9 +12,9 @@ use mibar_core::{
         text::{self, Text},
         Element, Widget, SizeConstraints
     },
-    Size, MouseEvent, MouseButton,
+    Size, Rect, MouseEvent, MouseButton,
     InitCtx, UpdateCtx, DrawCtx, LayoutCtx,
-    Event, TypedId, ValueSender
+    Event, TypedId, ValueSender, StateHandle
 };
 
 pub type FormatFn = fn(pulseaudio::State) -> String;
@@ -107,15 +107,15 @@ impl Widget for PulseAudioVolumeWidget {
     type State = State;
 
     fn layout(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut LayoutCtx,
         bounds: SizeConstraints
     ) -> Size {
-        ctx.layout(&state.text, bounds)
+        ctx.layout(ctx.tree[handle].text, bounds)
     }
 
     fn event(
-        _state: &mut Self::State,
+        _handle: StateHandle<Self::State>,
         ctx: &mut UpdateCtx,
         event: &Event
     ) {
@@ -127,18 +127,20 @@ impl Widget for PulseAudioVolumeWidget {
     }
 
     fn task_result(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut UpdateCtx,
         data: Box<dyn Any>
     ) {
         let pa_state = *data.downcast::<pulseaudio::State>().unwrap();
+
+        let state = &ctx.tree[handle];
         let text = (state.format)(pa_state);
 
-        ctx.message(&state.text, text::Message::SetText(text));
+        ctx.message(state.text, text::Message::SetText(text));
     }
 
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.draw(&state.text);
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {
+        ctx.draw(ctx.tree[handle].text);
     }
 
     fn destroy(state: Self::State) {

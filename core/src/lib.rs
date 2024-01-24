@@ -1,4 +1,5 @@
 pub mod widget;
+mod widget_tree;
 mod ui;
 mod geometry;
 mod theme;
@@ -12,6 +13,7 @@ mod asset_loader;
 
 pub use client::run;
 pub use ui::*;
+pub use widget_tree::*;
 pub use renderer::Renderer;
 pub use geometry::*;
 pub use theme::*;

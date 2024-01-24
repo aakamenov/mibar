@@ -1,7 +1,7 @@
 use mibar_core::{
     widget::{SizeConstraints, Element, Widget},
     MouseEvent, MouseButton, Size, Rect, Circle, Color, Event,
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TextInfo
+    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TextInfo, StateHandle
 };
 
 use super::hyprland;
@@ -78,19 +78,21 @@ impl Element for Button {
     }
 
     fn message(
-        state: &mut <Self::Widget as Widget>::State,
+        handle: StateHandle<<Self::Widget as Widget>::State>,
         ctx: &mut UpdateCtx,
         msg: Self::Message
     ) {
+        let state = &mut ctx.tree[handle];
+
         if msg.is_current != state.status.is_current {
             state.status.is_current = msg.is_current;
-            ctx.request_redraw();
+            ctx.ui.request_redraw();
         }
 
         if msg.num_windows != state.status.num_windows {
             state.status.num_windows = msg.num_windows;
             state.text = msg.num_windows.to_string();
-            ctx.request_layout();
+            ctx.ui.request_layout();
         }
     }
 }
@@ -99,28 +101,32 @@ impl Widget for ButtonWidget {
     type State = State;
 
     fn layout(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut LayoutCtx,
         bounds: SizeConstraints
     ) -> Size {
         let diameter = RADIUS * 2f32;
         let size = Size::new(diameter, diameter);
 
+        let state = &mut ctx.tree[handle];
         let info = TextInfo::new(&state.text, TEXT_SIZE)
-            .with_font(ctx.theme().font);
+            .with_font(ctx.ui.theme().font);
 
-        state.text_dimensions = ctx.measure_text(&info, size);
+        state.text_dimensions = ctx.renderer.measure_text(&info, size);
 
         bounds.constrain(size)
     }
 
-    fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
+    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
+        let layout = ctx.layout();
+        let state = &mut ctx.tree[handle];
+
         match event {
             Event::Mouse(event) => match event {
                 MouseEvent::MouseMove(pos) => {
-                    if ctx.layout().contains(*pos) {
+                    if layout.contains(*pos) {
                         if !state.is_hovered && !state.status.is_current {
-                            ctx.request_redraw();
+                            ctx.ui.request_redraw();
                         }
 
                         state.is_hovered = true;
@@ -129,30 +135,32 @@ impl Widget for ButtonWidget {
                         state.is_active = false;
 
                         if !state.status.is_current {
-                            ctx.request_redraw();
+                            ctx.ui.request_redraw();
                         }
                     }
                 }
                 MouseEvent::MousePress { pos, button }
                     if matches!(button, MouseButton::Left) =>
                 {
-                    if ctx.layout().contains(*pos) && !state.status.is_current {
+                    if layout.contains(*pos) && !state.status.is_current {
                         state.is_active = true;
-                        ctx.request_redraw();
+                        ctx.ui.request_redraw();
                     }
                 }
                 MouseEvent::MouseRelease { pos, button }
                     if matches!(button, MouseButton::Left) =>
                 {
                     if state.is_active &&
-                        ctx.layout().contains(*pos) &&
+                        layout.contains(*pos) &&
                         !state.status.is_current
                     {
-                        let _ = ctx.task_void(hyprland::change_workspace(state.id));
+                        let id = state.id;
+                        let _ = ctx.task_void(hyprland::change_workspace(id));
                     }
 
+                    let state = &mut ctx.tree[handle];
                     if state.is_active && !state.status.is_current {
-                        ctx.request_redraw();
+                        ctx.ui.request_redraw();
                     }
 
                     state.is_active = false;
@@ -162,9 +170,9 @@ impl Widget for ButtonWidget {
         }
     }
 
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, layout: Rect) {
+        let state = &ctx.tree[handle];
         let style = (state.style)();
-        let layout = ctx.layout();
         let center = layout.center();
         let has_windows = state.status.num_windows > 0;
 
@@ -194,7 +202,7 @@ impl Widget for ButtonWidget {
             layout.width / 2f32
         };
 
-        ctx.renderer().fill_circle(
+        ctx.renderer.fill_circle(
             Circle::new(
                 center,
                 radius,
@@ -211,9 +219,9 @@ impl Widget for ButtonWidget {
             rect.y = center.y - (rect.height / 2f32);
     
             let info = TextInfo::new(&state.text, TEXT_SIZE)
-                .with_font(ctx.theme().font);
+                .with_font(ctx.ui.theme().font);
 
-            ctx.renderer().fill_text(
+            ctx.renderer.fill_text(
                 &info,
                 rect,
                 if state.status.is_current {

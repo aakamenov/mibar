@@ -1,113 +1,113 @@
 use std::{marker::PhantomData, ops::{Deref, DerefMut}};
 
 use crate::{
-    geometry::Size,
-    ui::{InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId, Event},
+    InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    Id, Event, Size, Rect, StateHandle
 };
 
 use super::{Element, Widget, SizeConstraints};
 
-pub struct State<T, E: Element, F: FnOnce(StateHandle<T>) -> E> {
-    state: Box<T>,
+pub struct AppState<
+    T,
+    E: Element,
+    F: FnOnce(StateHandle<State<T>>) -> E
+> {
+    state: T,
     create_child: F
 }
 
-pub struct StateWidget<T, E: Element> {
-    state: PhantomData<T>,
-    child: PhantomData<E>
+pub struct StateWidget<T> {
+    data: PhantomData<T>
 }
 
-pub enum Message<T, E: Element> {
-    Mutate(fn(&mut T, &mut UpdateCtx)),
-    MutateClosure(Box<dyn FnOnce(&mut T, &mut UpdateCtx)>),
-    Child(E::Message)
+pub enum Message<T> {
+    Mutate(fn(&mut T)),
+    MutateClosure(Box<dyn FnOnce(&mut T)>)
 }
 
-pub struct InternalState<T, E: Element> {
-    state: Box<T>,
-    child: TypedId<E>
+pub struct State<T> {
+    pub state: T,
+    child: Id
 }
 
-// This pointer to the `state` field in InternalState is safe because
-// we only pass the handle to child widgets and the parent's lifetime
-// is always longer or equal to its children.
-#[derive(Clone, Copy, PartialEq)]
-pub struct StateHandle<T>(*mut T);
-
-impl<T, E: Element, F: FnOnce(StateHandle<T>) -> E> State<T, E, F> {
+impl<T, E: Element, F: FnOnce(StateHandle<State<T>>) -> E> AppState<T, E, F> {
     #[inline]
     pub fn new(state: T, create_child: F) -> Self {
         Self {
-            state: Box::new(state),
+            state,
             create_child
         }
     }
 }
 
-impl<T: 'static, E: Element + 'static, F: FnOnce(StateHandle<T>) -> E> Element for State<T, E, F> {
-    type Widget = StateWidget<T, E>;
-    type Message = Message<T, E>;
+impl<
+    T: 'static,
+    E: Element + 'static,
+    F: FnOnce(StateHandle<State<T>>) -> E
+> Element for AppState<T, E, F> {
+    type Widget = StateWidget<T>;
+    type Message = Message<T>;
 
-    fn make_widget(mut self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, ctx: &mut InitCtx) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let handle = StateHandle(self.state.as_mut());
+        let handle = StateHandle::new(ctx.active);
 
         (
-            StateWidget { state: PhantomData, child: PhantomData },
-            InternalState {
+            StateWidget { data: PhantomData },
+            State {
                 state: self.state,
-                child: ctx.new_child((self.create_child)(handle))
+                child: ctx.new_child((self.create_child)(handle)).into()
             }
         )
     }
 
     fn message(
-        state: &mut <Self::Widget as Widget>::State,
+        handle: StateHandle<<Self::Widget as Widget>::State>,
         ctx: &mut UpdateCtx,
         msg: Self::Message
     ) {
+        let state = &mut ctx.tree[handle];
         match msg {
-            Message::Mutate(mutate) => mutate(&mut state.state, ctx),
-            Message::MutateClosure(mutate) => mutate(&mut state.state, ctx),
-            Message::Child(msg) => ctx.message(&state.child, msg)
+            Message::Mutate(mutate) => mutate(&mut state.state),
+            Message::MutateClosure(mutate) => mutate(&mut state.state)
         }
     }
 }
 
-impl<T: 'static, E: Element + 'static> Widget for StateWidget<T, E> {
-    type State = InternalState<T, E>;
+impl<T: 'static> Widget for StateWidget<T> {
+    type State = State<T>;
 
     fn layout(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut LayoutCtx,
         bounds: SizeConstraints
     ) -> Size {
-        ctx.layout(&state.child, bounds)
+        ctx.layout(ctx.tree[handle].child, bounds)
     }
 
-    fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
-        ctx.event(&state.child, event)
+    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
+        ctx.event(ctx.tree[handle].child, event)
     }
 
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        ctx.draw(&state.child)
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {
+        ctx.draw(ctx.tree[handle].child)
     }
 }
 
-impl<T> Deref for StateHandle<T> {
+impl<T> Deref for State<T> {
     type Target = T;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        unsafe { &(*self.0) }
+        &self.state
     }
 }
 
-impl<T> DerefMut for StateHandle<T> {
+impl<T> DerefMut for State<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut (*self.0) }
+        &mut self.state
     }
 }

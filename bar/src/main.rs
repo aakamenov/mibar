@@ -14,14 +14,14 @@ use mibar::{
     widget::{
         button::{self, ButtonState},
         Element, Padding, Alignment,
-        Button, Text, Flex, FlexBuilder, State, StateHandle
+        Button, Text, Flex, FlexBuilder, AppState, State
     },
     window::{
         bar::{self, Bar},
         side_panel::{self, SidePanel},
         WindowId, WindowDimensions
     },
-    Theme, Font, Family, Color, QuadStyle, run
+    Theme, Font, Family, Color, QuadStyle, StateHandle, run
 };
 
 // Color palette: https://coolors.co/232f2e-293635-aca695-d9ddde-ff8000-70d900-ff4c57-00dbd7-ff64a2
@@ -101,8 +101,8 @@ fn build() -> impl Element {
         power_menu: None
     };
 
-    State::new(state, |handle| {
-        let create = |builder: &mut FlexBuilder| {
+    AppState::new(state, |handle| {
+        let create = move |builder: &mut FlexBuilder| {
             let left = Flex::row(|builder| {
                 builder.add_non_flex(Workspaces::new(workspaces_style));
                 builder.add_non_flex(DateTime::new());
@@ -132,7 +132,7 @@ fn build() -> impl Element {
     })
 }
 
-fn boot_menu_button(mut state: StateHandle<BarState>) -> Button<Text> {
+fn boot_menu_button(handle: StateHandle<State<BarState>>) -> Button<Text> {
     let text = Text::new("⏻")
         .text_size(22f32)
         // Use the monospaced font because the icon gets cut otherwise.
@@ -140,8 +140,8 @@ fn boot_menu_button(mut state: StateHandle<BarState>) -> Button<Text> {
         .font(font_mono());
 
     let size = BAR_SIZE as f32 - PADDING.vertical();
-    Button::with_child(text, move |ctx, _| {
-        match state.power_menu {
+    Button::with_child(text, move |ctx| {
+        match ctx.tree[handle].power_menu {
             Some(window_id) if window_id.is_alive() => ctx.close_window(window_id),
             _ => {
                 let panel = SidePanel::new(
@@ -150,7 +150,7 @@ fn boot_menu_button(mut state: StateHandle<BarState>) -> Button<Text> {
                 );
 
                 let window_id = ctx.open_window(panel, boot_menu_panel);
-                state.power_menu = Some(window_id);
+                ctx.tree[handle].power_menu = Some(window_id);
             }
         }
     })
@@ -192,7 +192,7 @@ fn boot_menu_panel() -> impl Element {
                 builder.add_non_flex(Text::new("Shutdown").font(font_mono()));
             });
 
-            Button::with_child(col, |_, _| {
+            Button::with_child(col, |_| {
                 if let Err(err) = Command::new("shutdown").arg("-h").arg("now").spawn() {
                     eprintln!("Failed to execute shutdown command: {err}");
                 }
@@ -207,7 +207,7 @@ fn boot_menu_panel() -> impl Element {
                 builder.add_non_flex(Text::new("Reboot").font(font_mono()));
             });
 
-            Button::with_child(col, |_, _| {
+            Button::with_child(col, |_| {
                 if let Err(err) = Command::new("reboot").spawn() {
                     eprintln!("Failed to execute reboot command: {err}");
                 }

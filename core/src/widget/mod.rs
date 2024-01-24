@@ -12,16 +12,13 @@ pub use text::Text;
 pub use button::{Button, ButtonState};
 pub use image::Image;
 pub use container::Container;
-pub use state::{State, StateHandle};
+pub use state::{AppState, State};
 
 use std::any::{Any, type_name};
 
 use crate::{
-    geometry::Size,
-    ui::{
-        InitCtx, DrawCtx, LayoutCtx,
-        UpdateCtx, Event
-    }
+    InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    Event, StateHandle, Size, Rect
 };
 
 pub trait Element {
@@ -34,7 +31,7 @@ pub trait Element {
     );
 
     fn message(
-        _state: &mut <Self::Widget as Widget>::State,
+        _handle: StateHandle<<Self::Widget as Widget>::State>,
         _ctx: &mut UpdateCtx,
         _msg: Self::Message
     ) { }
@@ -43,10 +40,10 @@ pub trait Element {
 pub trait Widget {
     type State: 'static;
 
-    fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size;
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx);
-    fn event(_state: &mut Self::State, _ctx: &mut UpdateCtx, _event: &Event) { }
-    fn task_result(_state: &mut Self::State, _ctx: &mut UpdateCtx, _data: Box<dyn Any>) {
+    fn layout(handle: StateHandle<Self::State>, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size;
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, layout: Rect);
+    fn event(_handle: StateHandle<Self::State>, _ctx: &mut UpdateCtx, _event: &Event) { }
+    fn task_result(_handle: StateHandle<Self::State>, _ctx: &mut UpdateCtx, _data: Box<dyn Any>) {
         panic!(
             "{} is executing async tasks but hasn't implemented Widget::task_result",
             type_name::<Self>()
@@ -56,33 +53,10 @@ pub trait Widget {
 }
 
 pub trait AnyWidget {
-    fn layout(
-        &self,
-        state: &mut Box<dyn Any + 'static>,
-        ctx: &mut LayoutCtx,
-        bounds: SizeConstraints
-    ) -> Size;
-
-    fn draw(
-        &self,
-        state: &mut Box<dyn Any + 'static>,
-        ctx: &mut DrawCtx
-    );
-
-    fn event(
-        &self,
-        _state: &mut Box<dyn Any + 'static>,
-        _ctx: &mut UpdateCtx,
-        _event: &Event
-    );
-
-    fn task_result(
-        &self,
-        _state: &mut Box<dyn Any + 'static>,
-        _ctx: &mut UpdateCtx,
-        _data: Box<dyn Any>
-    );
-
+    fn layout(&self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size;
+    fn draw(&self, ctx: &mut DrawCtx, layout: Rect);
+    fn event(&self, _ctx: &mut UpdateCtx, _event: &Event);
+    fn task_result(&self, _ctx: &mut UpdateCtx, _data: Box<dyn Any>);
     fn destroy(&self, state: Box<dyn Any + 'static>);
 }
 
@@ -98,44 +72,26 @@ pub trait AnyWidget {
 
 impl<T: Widget> AnyWidget for T {
     #[inline]
-    fn layout(
-        &self,
-        state: &mut Box<dyn Any + 'static>,
-        ctx: &mut LayoutCtx,
-        bounds: SizeConstraints
-    ) -> Size {
-        <T as Widget>::layout(state.downcast_mut().unwrap(), ctx, bounds)
+    fn layout(&self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+        <T as Widget>::layout(StateHandle::new(ctx.active), ctx, bounds)
     }
 
     #[inline]
-    fn draw(
-        &self,
-        state: &mut Box<dyn Any + 'static>,
-        ctx: &mut DrawCtx
-    ) {
-        <T as Widget>::draw(state.downcast_mut().unwrap(), ctx)
+    fn draw(&self, ctx: &mut DrawCtx, layout: Rect) {
+        <T as Widget>::draw(StateHandle::new(ctx.active), ctx, layout)
     }
 
     #[inline]
-    fn event(
-        &self,
-        state: &mut Box<dyn Any + 'static>,
-        ctx: &mut UpdateCtx,
-        event: &Event
-    ) {
-        <T as Widget>::event(state.downcast_mut().unwrap(), ctx, event)
+    fn event(&self, ctx: &mut UpdateCtx, event: &Event) {
+        <T as Widget>::event(StateHandle::new(ctx.active), ctx, event)
     }
 
     #[inline]
-    fn task_result(
-        &self,
-        state: &mut Box<dyn Any + 'static>,
-        ctx: &mut UpdateCtx,
-        data: Box<dyn Any>
-    ) {
-        <T as Widget>::task_result(state.downcast_mut().unwrap(), ctx, data)
+    fn task_result(&self, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
+        <T as Widget>::task_result(StateHandle::new(ctx.active), ctx, data)
     }
 
+    #[inline]
     fn destroy(&self, state: Box<dyn Any + 'static>) {
         <T as Widget>::destroy(*state.downcast().unwrap());
     }

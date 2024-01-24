@@ -1,9 +1,6 @@
 use crate::{
-    geometry::Size,
-    ui::{InitCtx, DrawCtx, LayoutCtx, UpdateCtx},
-    draw::{TextInfo, LineHeight},
-    theme::Font,
-    color::Color
+    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, StateHandle,
+    Size, Rect, Font, Color, TextInfo, LineHeight
 };
 use super::{SizeConstraints, Element, Widget};
 
@@ -83,7 +80,7 @@ impl Element for Text {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let theme = ctx.theme();
+        let theme = ctx.ui.theme();
 
         (
             TextWidget,
@@ -98,20 +95,22 @@ impl Element for Text {
     }
 
     fn message(
-        state: &mut <Self::Widget as Widget>::State,
+        handle: StateHandle<<Self::Widget as Widget>::State>,
         ctx: &mut UpdateCtx,
         msg: Self::Message
     ) {
+        let state = &mut ctx.tree[handle];
+
         match msg {
             Message::SetText(text) => {
                 if text != state.text {
                     state.text = text;
-                    ctx.request_layout();
+                    ctx.ui.request_layout();
                 }
             }
             Message::SetStyle(style) => {
                 state.style = Some(style);
-                ctx.request_redraw();
+                ctx.ui.request_redraw();
             }
         }
     }
@@ -121,10 +120,11 @@ impl Widget for TextWidget {
     type State = State;
 
     fn layout(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut LayoutCtx,
         bounds: SizeConstraints
     ) -> Size {
+        let state = &ctx.tree[handle];
         let info = TextInfo {
             text: &state.text,
             size: state.text_size,
@@ -132,17 +132,17 @@ impl Widget for TextWidget {
             font: state.font
         };
 
-        bounds.constrain(ctx.measure_text(&info, bounds.max))
+        bounds.constrain(ctx.renderer.measure_text(&info, bounds.max))
     }
 
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, rect: Rect) {
+        let state = &ctx.tree[handle];
         let color = if let Some(color_fn) = state.style {
             color_fn()
         } else {
-            ctx.theme().text_color()
+            ctx.ui.theme().text_color()
         };
         
-        let rect = ctx.layout();
         let info = TextInfo {
             text: &state.text,
             size: state.text_size,
@@ -150,6 +150,6 @@ impl Widget for TextWidget {
             font: state.font
         };
 
-        ctx.renderer().fill_text(&info, rect, color);
+        ctx.renderer.fill_text(&info, rect, color);
     }
 }

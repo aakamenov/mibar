@@ -6,8 +6,8 @@ use std::{any::Any, mem::MaybeUninit};
 
 use mibar_core::{
     widget::{SizeConstraints, Element, Widget},
-    MouseEvent, Size, InitCtx, DrawCtx, LayoutCtx,
-    UpdateCtx, Event, ValueSender, TypedId
+    MouseEvent, Size, Rect, InitCtx, DrawCtx, LayoutCtx,
+    UpdateCtx, Event, ValueSender, TypedId, StateHandle
 };
 
 use crate::hyprland::{self, WorkspacesChanged, SubscriptionToken};
@@ -41,8 +41,8 @@ impl Element for Workspaces {
         <Self::Widget as Widget>::State
     ) {
         let token = hyprland::subscribe_workspaces(
-            ctx.runtime_handle(),
-            ctx.window_id(),
+            ctx.ui.runtime_handle(),
+            ctx.ui.window_id(),
             ctx.value_sender()
         );
 
@@ -67,7 +67,7 @@ impl Element for Workspaces {
 impl Widget for WorkspacesWidget {
     type State = State;
 
-    fn event(state: &mut Self::State, ctx: &mut UpdateCtx, event: &Event) {
+    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
         if let Event::Mouse(MouseEvent::Scroll(delta)) = event {
             if ctx.is_hovered() {
                 let y = delta.values().y;
@@ -81,13 +81,13 @@ impl Widget for WorkspacesWidget {
             }
         }
 
-        for button in &state.buttons {
+        for button in ctx.tree[handle].buttons.clone() {
             ctx.event(button, event);
         }
     }
 
     fn task_result(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut UpdateCtx,
         data: Box<dyn Any>
     ) {
@@ -106,7 +106,7 @@ impl Widget for WorkspacesWidget {
                 is_current: workspace.id == event.current,
                 num_windows: workspace.num_windows
             };
-            ctx.message(&state.buttons[index], msg);
+            ctx.message(ctx.tree[handle].buttons[index], msg);
         }
 
         for (i, is_empty) in empty.into_iter().enumerate() {
@@ -118,12 +118,12 @@ impl Widget for WorkspacesWidget {
                 is_current: i + 1 == event.current as usize,
                 num_windows: 0
             };
-            ctx.message(&state.buttons[i], msg);
+            ctx.message(ctx.tree[handle].buttons[i], msg);
         }
     }
 
     fn layout(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut LayoutCtx,
         bounds: SizeConstraints
     ) -> Size {
@@ -131,7 +131,7 @@ impl Widget for WorkspacesWidget {
         let mut height = 0f32;
         let mut available = bounds.max.width;
 
-        for button in &state.buttons {
+        for button in ctx.tree[handle].buttons.clone() {
             let bounds = SizeConstraints::new(
                 Size::ZERO,
                 Size::new(available, bounds.max.height)
@@ -152,8 +152,8 @@ impl Widget for WorkspacesWidget {
         bounds.constrain(Size::new(width, height))
     }
 
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
-        for button in &state.buttons {
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {
+        for button in ctx.tree[handle].buttons.clone() {
             ctx.draw(button);
         }
     }

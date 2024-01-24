@@ -4,24 +4,24 @@ use std::{
     future::Future,
     marker::PhantomData,
     collections::VecDeque,
-    borrow::Borrow,
-    hash::{Hash, Hasher}
+    hash::{Hash, Hasher},
+    rc::Rc
 };
 
 use tiny_skia::PixmapMut;
 use tokio::{runtime, task::JoinHandle, sync::mpsc::UnboundedSender};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
-use slotmap::{SlotMap, SecondaryMap, Key, new_key_type};
-use smallvec::SmallVec;
+use slotmap::Key;
 
 use crate::{
     geometry::{Rect, Size, Point},
-    widget::{
-        Element, Widget, AnyWidget, SizeConstraints
+    widget_tree::{
+        WidgetTree, WidgetState, RawWidgetId,
+        RawActionId, StateHandle, Action
     },
+    widget::{Element, Widget, AnyWidget, SizeConstraints},
     theme::Theme,
-    draw::TextInfo,
-    renderer::Renderer,
+    renderer::{Renderer, ImageCacheHandle},
     wayland::{
         popup::{self, PopupWindowConfig},
         WindowEvent, MouseEvent, WindowConfig
@@ -43,41 +43,73 @@ pub struct ValueSender<T: Send> {
     phantom: PhantomData<T>
 }
 
+#[derive(Debug)]
 pub struct TypedId<E: Element> {
     id: Id,
     message: fn(
-        &mut <E::Widget as Widget>::State,
+        StateHandle<<E::Widget as Widget>::State>,
         &mut UpdateCtx,
         E::Message
     ),
     data: PhantomData<E>
 }
 
-#[derive(Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct Id(RawWidgetId);
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub struct ActionId {
+    widget: RawWidgetId,
+    action: RawActionId
+}
+
 pub struct LayoutCtx<'a> {
-    ui: &'a mut UiCtx
+    pub ui: &'a mut UiCtx,
+    pub tree: &'a mut WidgetTree,
+    pub renderer: &'a mut Renderer,
+    pub(crate) active: RawWidgetId
 }
 
 pub struct DrawCtx<'a> {
-    ui: &'a mut UiCtx,
-    layout: Rect
+    pub ui: &'a mut UiCtx,
+    pub tree: &'a mut WidgetTree,
+    pub renderer: &'a mut Renderer,
+    pub(crate) active: RawWidgetId
 }
 
 pub struct UpdateCtx<'a> {
-    ui: &'a mut UiCtx,
-    current: RawWidgetId
+    pub ui: &'a mut UiCtx,
+    pub tree: &'a mut WidgetTree,
+    pub(crate) active: RawWidgetId
 }
 
 pub struct InitCtx<'a> {
-    pub(crate) ui: &'a mut UiCtx,
-    current: RawWidgetId
+    pub ui: &'a mut UiCtx,
+    pub(crate) tree: &'a mut WidgetTree,
+    pub(crate) active: RawWidgetId
 }
 
 #[derive(Debug)]
 pub enum Event {
     Mouse(MouseEvent)
+}
+
+pub struct UiCtx {
+    pub(crate) image_cache_handle: ImageCacheHandle,
+    // Each Ui keeps a local copy of the current Theme. Whenever the theme
+    // is mutated, the Ui sends a request to the client which then propagates
+    // the changes to all the other windows. This may be more expensive than
+    // using a mutex but changing the theme in practice happens rarely (if ever)
+    // as opposed to synchronizing access every time we want to read it which
+    // occurs multiple times per UI re-draw.
+    theme: Theme,
+    mouse_pos: Option<Point>,
+    needs_redraw: bool,
+    needs_layout: bool,
+    rt_handle: runtime::Handle,
+    task_send: Sender<TaskResult>,
+    client_send: UnboundedSender<UiRequest>,
+    window_id: WindowId
 }
 
 #[derive(Debug)]
@@ -87,42 +119,11 @@ pub(crate) enum UiEvent {
 }
 
 pub(crate) struct Ui {
+    pub(crate) renderer: Renderer,
     pub(crate) ctx: UiCtx,
+    tree: WidgetTree,
     root: Id,
     size: Size
-}
-
-pub(crate) struct UiCtx {
-    pub(crate) renderer: Renderer,
-    // Each Ui keeps a local copy of the current Theme. Whenever the theme
-    // is mutated, the Ui sends a request to the client which then propagates
-    // the changes to all the other windows. This may be more expensive than
-    // using a mutex but changing the theme in practice happens rarely (if ever)
-    // as opposed to synchronizing access every time we want to read it which
-    // occurs multiple times per UI re-draw.
-    theme: Theme,
-    mouse_pos: Option<Point>,
-    widgets: SlotMap<RawWidgetId, WidgetState>,
-    needs_redraw: bool,
-    needs_layout: bool,
-    parent_to_children: SecondaryMap<RawWidgetId, SmallVec<[RawWidgetId; 4]>>,
-    child_to_parent: SecondaryMap<RawWidgetId, RawWidgetId>,
-    rt_handle: runtime::Handle,
-    task_send: Sender<TaskResult>,
-    client_send: UnboundedSender<UiRequest>,
-    window_id: WindowId
-}
-
-new_key_type! {
-    /// Internal id that unlike `Id` or `TypedId` (which wrap around it and disable Copy/Clone)
-    /// doesn't track widget lifetimes. Should be used with great care!!!
-    pub(crate) struct RawWidgetId;
-}
-
-struct WidgetState {
-    widget: Box<dyn AnyWidget>,
-    state: Box<dyn Any>,
-    layout: Rect
 }
 
 impl Ui {
@@ -134,15 +135,14 @@ impl Ui {
         theme: Theme,
         root: E
     ) -> Self {
+        let mut renderer = Renderer::new();
+        let mut tree = WidgetTree::new();
         let mut ctx = UiCtx {
-            renderer: Renderer::new(),
             theme,
             mouse_pos: None,
-            widgets: SlotMap::with_capacity_and_key(20),
+            image_cache_handle: renderer.image_cache_handle(),
             needs_redraw: false,
             needs_layout: false,
-            parent_to_children: SecondaryMap::new(),
-            child_to_parent: SecondaryMap::new(),
             rt_handle,
             task_send,
             client_send,
@@ -150,15 +150,18 @@ impl Ui {
         };
 
         let mut init_ctx = InitCtx {
-            current: RawWidgetId::null(),
-            ui: &mut ctx
+            tree: &mut tree,
+            ui: &mut ctx,
+            active: RawWidgetId::null()
         };
 
         let root = init_ctx.new_child(root);
 
         Self {
-            root: root.into(),
             ctx,
+            renderer,
+            tree,
+            root: root.into(),
             size: Size::ZERO
         }
     }
@@ -203,30 +206,28 @@ impl Ui {
         }
 
         let mut ctx = UpdateCtx {
+            tree: &mut self.tree,
             ui: &mut self.ctx,
-            current: self.root.0
+            active: RawWidgetId::null()
         };
 
-        ctx.event(&self.root, &event);
+        ctx.event(self.root, &event);
     }
 
     pub fn task_result(&mut self, result: TaskResult) {
         // Widget might have been removed while the task was executing.
-        let Some(state) = self.ctx.widgets.get_mut(result.id) else {
+        let Some(state) = self.tree.widgets.get(result.id) else {
             return;
         };
 
-        let state = state as *mut WidgetState;
-
+        let widget = Rc::clone(&state.widget);
         let mut ctx = UpdateCtx {
+            tree: &mut self.tree,
             ui: &mut self.ctx,
-            current: result.id
+            active: result.id
         };
 
-        unsafe {
-            let state = &mut (*state);
-            state.widget.task_result(&mut state.state, &mut ctx, result.data);
-        }
+        widget.task_result(&mut ctx, result.data);
     }
 
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
@@ -235,20 +236,22 @@ impl Ui {
         }
 
         let mut ctx = DrawCtx {
+            renderer: &mut self.renderer,
+            tree: &mut self.tree,
             ui: &mut self.ctx,
-            layout: Rect::default()
+            active: RawWidgetId::null()
         };
 
-        ctx.draw(&self.root);
+        ctx.draw(self.root);
 
         self.ctx.needs_redraw = false;
         self.ctx.needs_layout = false;
 
-        self.ctx.renderer.render(pixmap);
+        self.renderer.render(pixmap);
     }
 
     pub fn destroy(mut self) {
-        self.ctx.dealloc(self.root);
+        self.tree.dealloc(self.root.0);
     }
 
     #[inline]
@@ -258,18 +261,22 @@ impl Ui {
 
     #[inline]
     pub fn set_scale_factor(&mut self, scale_factor: f32) {
-        if self.ctx.renderer.scale_factor() != scale_factor {
-            self.ctx.renderer.set_scale_factor(scale_factor);
+        if self.renderer.scale_factor() != scale_factor {
+            self.renderer.set_scale_factor(scale_factor);
             self.ctx.needs_redraw = true;
         }
     }
 
     fn layout_impl(&mut self, constraints: SizeConstraints) -> Size {
         let mut ctx = LayoutCtx {
-            ui: &mut self.ctx
+            renderer: &mut self.renderer,
+            tree: &mut self.tree,
+            ui: &mut self.ctx,
+            active: RawWidgetId::null()
         };
 
-        let size = ctx.layout(&self.root, constraints);
+        let size = ctx.layout(self.root, constraints);
+        self.tree.widgets[self.root.0].layout.set_size(size);
 
         // Translate all widget positions from parent local space
         // to window space. This feels like a giant hack but enables us to have
@@ -280,19 +287,19 @@ impl Ui {
         //
         // Is there a better way to do this?
         let mut queue = VecDeque::with_capacity(
-            self.ctx.parent_to_children.len()
+            self.tree.parent_to_children.len()
         );
         queue.push_back(self.root.0);
 
         while let Some(current) = queue.pop_front() {
             // The entry will be None when we reach a leaf node.
-            let children = self.ctx.parent_to_children.entry(current).unwrap().or_default();
+            let children = self.tree.parent_to_children.entry(current).unwrap().or_default();
             queue.extend(children.iter());
 
-            let offset = self.ctx.widgets[current].layout.origin();
+            let offset = self.tree.widgets[current].layout.origin();
             
             for child in children {
-                let state = self.ctx.widgets.get_mut(*child).unwrap();
+                let state = self.tree.widgets.get_mut(*child).unwrap();
     
                 state.layout.x += offset.x;
                 state.layout.y += offset.y;
@@ -305,83 +312,87 @@ impl Ui {
 
 impl UiCtx {
     #[inline]
+    pub fn request_redraw(&mut self) {
+        self.needs_redraw = true;
+    }
+
+    #[inline]
+    pub fn request_layout(&mut self) {
+        self.needs_layout = true;
+        self.needs_redraw = true;
+    }
+
+    /// `None` means the mouse is currently outside the window.
+    #[inline]
+    pub fn mouse_pos(&self) -> Option<Point> {
+        self.mouse_pos
+    }
+
+    #[inline]
+    pub fn is_hovered(&self, layout: Rect) -> bool {
+        if let Some(pos) = self.mouse_pos {
+            layout.contains(pos)
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    pub fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
+    pub fn theme_mut(&mut self, change: impl FnOnce(&mut Theme)) {
+        change(&mut self.theme);
+        self.needs_redraw = true;
+
+        self.client_send.send(
+            UiRequest {
+                id: self.window_id,
+                action: WindowAction::ThemeChanged(self.theme.clone())
+            }
+        ).unwrap();
+    }
+
+    #[inline]
     pub fn window_id(&self) -> WindowId {
         self.window_id
     }
 
-    fn dealloc(&mut self, id: Id) {
-        let widget = self.widgets.remove(id.0).unwrap();
-
-        let parent = self.child_to_parent.remove(id.0).unwrap();
-        let children = self.parent_to_children.get_mut(parent).unwrap();
-        let index = children.iter().position(|x| *x == id.0).unwrap();
-
-        // Can't use swap_remove() because order is important
-        children.remove(index);
-
-        let children = self.parent_to_children
-            .remove(id.0)
-            .unwrap_or_default();
-
-        for child in children {
-            self.dealloc_impl(child);
-        }
-
-        // We call destroy after we've deallocated the children as
-        // they could be relying on the parent being alive during their
-        // destroy() call (as is the case with StateHandle<T> in the State widget).
-        widget.widget.destroy(widget.state);
-    }
-
-    fn dealloc_impl(&mut self, id: RawWidgetId) {
-        let widget = self.widgets.remove(id).unwrap();
-
-        self.child_to_parent.remove(id).unwrap();
-
-        let children = self.parent_to_children
-            .remove(id)
-            .unwrap_or_default();
-
-        for child in children {
-            self.dealloc_impl(child);
-        }
-
-        // We call destroy after we've deallocated the children as
-        // they could be relying on the parent being alive during their
-        // destroy() call (as is the case with StateHandle<T> in the State widget).
-        widget.widget.destroy(widget.state);
+    #[inline]
+    pub fn runtime_handle(&self) -> &runtime::Handle {
+        &self.rt_handle
     }
 }
 
 impl<'a> LayoutCtx<'a> {
     #[inline]
-    pub fn layout(&mut self, id: impl Borrow<Id>, bounds: SizeConstraints) -> Size {
-        let state = self.ui.widgets.get_mut(id.borrow().0)
-            .unwrap() as *mut WidgetState;
+    pub fn layout(&mut self, id: impl Into<Id>, bounds: SizeConstraints) -> Size {
+        let next = id.into().0;
 
-        unsafe {
-            let state = &mut (*state);
-            state.layout = Rect::default();
-            
-            let size = state.widget.layout(&mut state.state, self, bounds);
-            state.layout.set_size(size);
+        let state = &mut self.tree.widgets[next];
+        state.layout = Rect::default();
 
-            size
-        }
-    }
+        let active = self.active;
+        let widget = Rc::clone(&state.widget);
 
-    #[inline]
-    pub fn measure_text(&mut self, info: &TextInfo, size: Size) -> Size {
-        self.ui.renderer.text_renderer.measure(info, size)
+        self.active = next;
+
+        let size = widget.layout(self, bounds);
+        self.tree.widgets[next].layout.set_size(size);
+
+        self.active = active;
+
+        size
     }
 
     #[inline]
     pub fn position(
         &mut self,
-        id: impl Borrow<Id>,
+        id: impl Into<Id>,
         func: impl FnOnce(&mut Rect)
     ) -> Rect {
-        let state = self.ui.widgets.get_mut(id.borrow().0).unwrap();
+        let state = &mut self.tree.widgets[id.into().0];
         func(&mut state.layout);
 
         state.layout
@@ -390,52 +401,64 @@ impl<'a> LayoutCtx<'a> {
 
 impl<'a> UpdateCtx<'a> {
     #[inline]
-    pub fn event(&mut self, id: impl Borrow<Id>, event: &Event) {
-        let id = id.borrow().0;
-        let state = self.ui.widgets.get_mut(id)
-            .unwrap() as *mut WidgetState;
+    pub fn event(&mut self, id: impl Into<Id>, event: &Event) {
+        let next = id.into().0;
+        let state = &mut self.tree.widgets[next];
 
-        unsafe {
-            let state = &mut (*state);
+        let active = self.active;
+        let widget = Rc::clone(&state.widget);
 
-            let prev = self.current;
-            self.current = id;
-
-            // Can't use "state" after this as the map might have been resized.
-            state.widget.event(&mut state.state, self, event);
-            self.current = prev;
-        }
+        self.active = next;
+        widget.event(self, event);
+        self.active = active;
     }
 
     #[inline]
     pub fn layout(&self) -> Rect {
-        self.ui.widgets[self.current].layout
+        self.tree.widgets[self.active].layout
     }
 
     #[inline]
-    pub fn message<E: Element>(&mut self, id: &TypedId<E>, msg: E::Message) {
-        let state = self.ui.widgets.get_mut(id.raw())
-            .unwrap() as *mut WidgetState;
+    pub fn is_hovered(&self) -> bool {
+        let layout = self.layout();
 
-        let prev = self.current;
-        self.current = id.raw();
+        self.ui.is_hovered(layout)
+    }
 
-        unsafe {
-            let state = &mut (*state);
-            (id.message)(state.state.downcast_mut().unwrap(), self, msg);
+    #[inline]
+    pub fn message<E: Element>(&mut self, id: TypedId<E>, msg: E::Message) {
+        let next = id.raw();
+        let active = self.active;
+
+        self.active = next;
+        (id.message)(StateHandle::new(next), self, msg);
+        self.active = active;
+    }
+
+    #[inline]
+    pub fn execute(&mut self, id: ActionId) -> bool {
+        let Some(actions) = self.tree.actions.get(id.widget) else {
+            return false;
+        };
+
+        if let Some(action) = actions.get(id.action).map(|x| Rc::clone(x)) {
+            action(self);
+
+            true
+        } else {
+            false
         }
-
-        self.current = prev;
     }
 
     #[inline]
     pub fn new_child<E: Element>(&mut self, el: E) -> TypedId<E>
         where E::Widget: AnyWidget
     {
-        self.request_layout();
+        self.ui.request_layout();
         
         let mut ctx = InitCtx {
-            current: self.current,
+            active: self.active,
+            tree: self.tree,
             ui: self.ui
         };
 
@@ -445,19 +468,8 @@ impl<'a> UpdateCtx<'a> {
     /// Destroys the given widget and all its children **immediately**.
     #[inline]
     pub fn destroy_child(&mut self, id: impl Into<Id>) {
-        self.request_layout();
-        self.ui.dealloc(id.into());
-    }
-
-    #[inline]
-    pub fn request_redraw(&mut self) {
-        self.ui.needs_redraw = true;
-    }
-
-    #[inline]
-    pub fn request_layout(&mut self) {
-        self.ui.needs_layout = true;
-        self.ui.needs_redraw = true;
+        self.ui.request_layout();
+        self.tree.dealloc(id.into().0);
     }
 
     pub fn open_window<E: Element>(
@@ -474,11 +486,11 @@ impl<'a> UpdateCtx<'a> {
             Window::Bar(bar) => WindowConfig::LayerShell(bar.into()),
             Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
             Window::Popup(popup) => {
-                let parent = self.window_id()
+                let parent = self.ui.window_id()
                     .surface()
                     .expect("attempting to open a popup during Ui init");
 
-                let pos = self.mouse_pos();
+                let pos = self.ui.mouse_pos();
                 let anchor_rect = match popup.location {
                     popup::Location::Cursor if pos.is_some()  => {
                         let pos = pos.unwrap();
@@ -522,38 +534,26 @@ impl<'a> UpdateCtx<'a> {
     #[inline]
     pub fn as_init_ctx<'b: 'a>(&'b mut self) -> InitCtx<'a> {
         InitCtx {
-            current: self.current,
+            active: self.active,
+            tree: self.tree,
             ui: self.ui
         }
     }
 }
 
 impl<'a> DrawCtx<'a> {
-    #[inline(always)]
-    pub fn renderer(&mut self) -> &mut Renderer {
-        &mut self.ui.renderer
-    }
-
     #[inline]
-    pub fn draw(&mut self, id: impl Borrow<Id>) {
-        let state = self.ui.widgets.get_mut(id.borrow().0)
-            .unwrap() as *mut WidgetState;
+    pub fn draw(&mut self, id: impl Into<Id>) {
+        let next = id.into().0;
+        let state = &mut self.tree.widgets[next];
 
-        unsafe {
-            let state = &mut (*state);
+        let active = self.active;
+        let widget = Rc::clone(&state.widget);
+        let layout = state.layout;
 
-            let prev = self.layout;
-            self.layout = state.layout;
-
-            state.widget.draw(&mut state.state, self);
-
-            self.layout = prev;
-        }
-    }
-
-    #[inline]
-    pub fn layout(&self) -> Rect {
-        self.layout
+        self.active = next;
+        widget.draw(self, layout);
+        self.active = active;
     }
 }
 
@@ -562,23 +562,23 @@ impl<'a> InitCtx<'a> {
         where E::Widget: AnyWidget
     {
         // Hack, so we can get a key from the SlotMap
-        let child = self.ui.widgets.insert(
-            WidgetState::new(Box::new(null_widget::NullWidget), Box::new(null_widget::State))
+        let child = self.tree.widgets.insert(
+            WidgetState::new(Rc::new(null_widget::NullWidget), Box::new(null_widget::State))
         );
 
-        let parent = self.current;
-        self.current = child;
+        let parent = self.active;
+        self.active = child;
 
         let (widget, state) = el.make_widget(self);
 
-        self.current = parent;
+        self.active = parent;
 
-        let state = WidgetState::new(Box::new(widget), Box::new(state));
-        self.ui.widgets[child] = state;
+        let state = WidgetState::new(Rc::new(widget), Box::new(state));
+        self.tree.widgets[child] = state;
 
-        self.ui.child_to_parent.insert(child, parent);
+        self.tree.child_to_parent.insert(child, parent);
 
-        match self.ui.parent_to_children.entry(parent) {
+        match self.tree.parent_to_children.entry(parent) {
             Some(entry) => entry.or_default().push(child),
             None => {
                 // We've reached the root widget which has no parent.
@@ -610,16 +610,22 @@ macro_rules! impl_context_method {
 impl_context_method! {
     InitCtx<'_>,
     UpdateCtx<'_>,
-    {   
+    {
         #[inline]
-        pub fn runtime_handle(&self) -> &runtime::Handle {
-            &self.ui.rt_handle
+        pub fn register_action(&mut self, action: Action) -> ActionId {
+            let actions = self.tree.actions.entry(self.active)
+                .unwrap()
+                .or_default();
+
+            let action = actions.insert(action);
+
+            ActionId { widget: self.active, action }
         }
 
         #[inline]
         pub fn value_sender<T: Send + 'static>(&self) -> ValueSender<T> {
             ValueSender::new(
-                self.current,
+                self.active,
                 self.ui.task_send.clone()
             )
         }
@@ -650,7 +656,8 @@ You can ignore the return value otherwise."]
             task: impl Future<Output = T> + Send + 'static
         ) -> JoinHandle<()> {
             let tx = self.ui.task_send.clone();
-            let id = self.current;
+            let id = self.active;
+            let window_id = self.ui.window_id();
     
             self.ui.rt_handle.spawn(async move {
                 let result = task.await;
@@ -659,7 +666,9 @@ You can ignore the return value otherwise."]
                     data: Box::new(result)
                 };
 
-                tx.send(result).unwrap();
+                if tx.send(result).is_err() {
+                    eprintln!("Failed to send task result to window {:?} - it has already closed.", window_id);
+                }
             })
         }
     
@@ -678,33 +687,16 @@ You can ignore the return value otherwise."]
             where Fut: Future<Output = ()> + Send + 'static
         {
             let sender = ValueSender::new(
-                self.current,
+                self.active,
                 self.ui.task_send.clone()
             );
     
             self.ui.rt_handle.spawn(create_future(sender))
         }
 
-        pub fn theme_mut(&mut self, change: impl FnOnce(&mut Theme)) {
-            change(&mut self.ui.theme);
-            self.ui.needs_redraw = true;
-
-            self.ui.client_send.send(
-                UiRequest {
-                    id: self.ui.window_id,
-                    action: WindowAction::ThemeChanged(self.ui.theme.clone())
-                }
-            ).unwrap();
-        }
-
-        #[inline]
-        pub fn window_id(&self) -> WindowId {
-            self.ui.window_id()
-        }
-
         pub(crate) fn load_asset(&self, source: impl Into<AssetSource>) {
             let sender = ValueSender::new(
-                self.current,
+                self.active,
                 self.ui.task_send.clone()
             );
 
@@ -714,51 +706,6 @@ You can ignore the return value otherwise."]
             };
 
             asset_loader::load(job);
-        }
-    }
-}
-
-impl_context_method! {
-    InitCtx<'_>,
-    LayoutCtx<'_>,
-    UpdateCtx<'_>,
-    DrawCtx<'_>,
-    {
-        /// `None` means the mouse is currently outside the window.
-        #[inline]
-        pub fn mouse_pos(&self) -> Option<Point> {
-            self.ui.mouse_pos
-        }
-
-        #[inline]
-        pub fn theme(&self) -> &Theme {
-            &self.ui.theme
-        }
-    }
-}
-
-impl_context_method! {
-    UpdateCtx<'_>,
-    DrawCtx<'_>,
-    {
-        #[inline]
-        pub fn is_hovered(&self) -> bool {
-            if let Some(pos) = self.ui.mouse_pos {
-                self.layout().contains(pos)
-            } else {
-                false
-            }
-        }
-    }
-}
-
-impl WidgetState {
-    #[inline]
-    fn new(widget: Box<dyn AnyWidget>, state: Box<dyn Any>) -> Self {
-        Self {
-            widget,
-            state,
-            layout: Rect::default()
         }
     }
 }
@@ -774,13 +721,13 @@ impl<T: Send + 'static> ValueSender<T> {
     }
 
     #[inline]
-    pub fn send(&self, value: T) {
+    pub fn send(&self, value: T) -> bool {
         let result = TaskResult {
             id: self.id,
             data: Box::new(value)
         };
 
-        self.sender.send(result).unwrap()
+        self.sender.send(result).is_ok()
     }
 }
 
@@ -805,26 +752,18 @@ impl<E: Element> Into<Id> for TypedId<E> {
     }
 }
 
-impl<E: Element> Borrow<Id> for TypedId<E> {
+impl<E: Element> Clone for TypedId<E> {
     #[inline]
-    fn borrow(&self) -> &Id {
-        &self.id
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            message: self.message,
+            data: PhantomData,
+        }
     }
 }
 
-impl<E: Element> Borrow<Id> for &TypedId<E> {
-    #[inline]
-    fn borrow(&self) -> &Id {
-        &self.id
-    }
-}
-
-impl<E: Element> Borrow<Id> for &mut TypedId<E> {
-    #[inline]
-    fn borrow(&self) -> &Id {
-        &self.id
-    }
-}
+impl<E: Element> Copy for TypedId<E> { }
 
 impl fmt::Debug for TaskResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -862,11 +801,11 @@ mod null_widget {
     impl Widget for NullWidget {
         type State = State;
 
-        fn layout(_state: &mut Self::State, _ctx: &mut LayoutCtx, _bounds: SizeConstraints) -> Size {
+        fn layout(_handle: StateHandle<Self::State>, _ctx: &mut LayoutCtx, _bounds: SizeConstraints) -> Size {
             panic!("Called into null widget. This is a bug...");
         }
 
-        fn draw(_state: &mut Self::State, _ctx: &mut DrawCtx) {
+        fn draw(_handle: StateHandle<Self::State>, _ctx: &mut DrawCtx, _layout: Rect) {
             panic!("Called into null widget. This is a bug...");
         }
     }

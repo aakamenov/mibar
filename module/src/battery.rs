@@ -2,7 +2,7 @@ use mibar_core::{
     widget::{SizeConstraints, Element, Widget},
     Size, Rect, InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
     ValueSender, TextInfo, Color, Quad, Background,
-    Weight, Font
+    Weight, Font, StateHandle
 };
 
 use tokio::{
@@ -104,7 +104,7 @@ impl Element for Battery {
             }
         });
 
-        let mut font = ctx.theme().font;
+        let mut font = ctx.ui.theme().font;
         font.weight = Weight::BOLD;
 
         let state = State {
@@ -123,13 +123,14 @@ impl Element for Battery {
 impl Widget for BatteryWidget {
     type State = State;
 
-    fn layout(state: &mut Self::State, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+    fn layout(handle: StateHandle<Self::State>, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+        let state = &mut ctx.tree[handle];
         let size = match state.info {
             BatteryInfoState::Info { .. } | BatteryInfoState::Error => {
                 let info = TextInfo::new(&state.text, TEXT_SIZE)
                     .with_font(state.font);
 
-                state.text_dimensions = ctx.measure_text(&info, BODY_SIZE);
+                state.text_dimensions = ctx.renderer.measure_text(&info, BODY_SIZE);
 
                 let mut size = BODY_SIZE;
                 size.width += TERMINAL_SIZE.width;
@@ -143,11 +144,12 @@ impl Widget for BatteryWidget {
     }
 
     fn task_result(
-        state: &mut Self::State,
+        handle: StateHandle<Self::State>,
         ctx: &mut UpdateCtx,
         data: Box<dyn std::any::Any>
     ) {
         let info = *data.downcast::<BatteryInfoState>().unwrap();
+        let state = &mut ctx.tree[handle];
 
         if state.info == info {
             return;
@@ -169,10 +171,12 @@ impl Widget for BatteryWidget {
         }
 
         state.info = info;
-        ctx.request_layout();
+        ctx.ui.request_layout();
     }
 
-    fn draw(state: &mut Self::State, ctx: &mut DrawCtx) {
+    fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, layout: Rect) {
+        let state = &ctx.tree[handle];
+
         if let BatteryInfoState::InitialRead = state.info {
             return;
         };
@@ -185,10 +189,10 @@ impl Widget for BatteryWidget {
 
         let style = (state.style)(capacity);
 
-        let mut body = ctx.layout();
+        let mut body = layout;
         body.set_size(BODY_SIZE);
 
-        ctx.renderer().fill_quad(
+        ctx.renderer.fill_quad(
             Quad::rounded(body, Color::TRANSPARENT, BODY_RADIUS)
                 .with_border(2f32, style.body)
         );
@@ -201,14 +205,14 @@ impl Widget for BatteryWidget {
             TERMINAL_SIZE.height
         );
 
-        ctx.renderer().fill_quad(
+        ctx.renderer.fill_quad(
             Quad::rounded(terminal, style.body, BODY_RADIUS)
         );
 
         let mut fill = body.shrink(2f32);
         fill.width = (fill.width * capacity as f32) / 100f32;
 
-        ctx.renderer().fill_quad(Quad::new(fill, style.background));
+        ctx.renderer.fill_quad(Quad::new(fill, style.background));
 
         let mut text_rect = Rect::from_size(state.text_dimensions);
         text_rect.x = body_center.x - (text_rect.width / 2f32);
@@ -217,7 +221,7 @@ impl Widget for BatteryWidget {
         let info = TextInfo::new(&state.text, TEXT_SIZE)
             .with_font(state.font);
 
-        ctx.renderer().fill_text(
+        ctx.renderer.fill_text(
             &info,
             text_rect,
             style.text
