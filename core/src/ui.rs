@@ -17,7 +17,7 @@ use crate::{
     geometry::{Rect, Size, Point},
     widget_tree::{
         WidgetTree, WidgetState, RawWidgetId,
-        RawActionId, StateHandle, Action
+        RawActionId, StateHandle, ContextHandle, Action
     },
     widget::{Element, Widget, AnyWidget, SizeConstraints},
     theme::Theme,
@@ -43,7 +43,6 @@ pub struct ValueSender<T: Send> {
     phantom: PhantomData<T>
 }
 
-#[derive(Debug)]
 pub struct TypedId<E: Element> {
     id: Id,
     message: fn(
@@ -472,6 +471,20 @@ impl<'a> UpdateCtx<'a> {
         self.tree.dealloc(id.into().0);
     }
 
+    pub fn with_context<T: 'static>(
+        &mut self,
+        context: T,
+        f: impl FnOnce(&mut Self, ContextHandle<T>)
+    ) -> T {
+        let id = self.tree.contexts.insert(Box::new(context));
+        f(self, ContextHandle::new(id));
+
+        let context = self.tree.contexts.remove(id).unwrap();
+        let boxed = context.downcast().unwrap();
+
+        *boxed
+    }
+
     pub fn open_window<E: Element>(
         &self,
         window: impl Into<Window>,
@@ -740,7 +753,7 @@ impl<T: Send> Hash for ValueSender<T> {
 
 impl<E: Element> TypedId<E> {
     #[inline]
-    fn raw(&self) -> RawWidgetId {
+    pub(crate) fn raw(&self) -> RawWidgetId {
         self.id.0
     }
 }
@@ -764,6 +777,13 @@ impl<E: Element> Clone for TypedId<E> {
 }
 
 impl<E: Element> Copy for TypedId<E> { }
+
+impl<E: Element> fmt::Debug for TypedId<E> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.id, f)
+    }
+}
 
 impl fmt::Debug for TaskResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
