@@ -10,10 +10,12 @@ use super::{Element, Widget, SizeConstraints};
 pub struct AppState<
     T,
     E: Element,
-    F: FnOnce(StateHandle<State<T>>) -> E
+    S: FnOnce(&mut InitCtx) -> T,
+    F: FnOnce(&mut T, StateHandle<State<T>>) -> E
 > {
-    state: T,
-    create_child: F
+    create_state: S,
+    create_child: F,
+    data: PhantomData<T>
 }
 
 pub struct StateWidget<T> {
@@ -30,12 +32,21 @@ pub struct State<T> {
     child: Id
 }
 
-impl<T, E: Element, F: FnOnce(StateHandle<State<T>>) -> E> AppState<T, E, F> {
+impl<
+    T,
+    E: Element,
+    S: FnOnce(&mut InitCtx) -> T,
+    F: FnOnce(&mut T, StateHandle<State<T>>) -> E
+> AppState<T, E, S, F> {
     #[inline]
-    pub fn new(state: T, create_child: F) -> Self {
+    pub fn new(
+        create_state: S,
+        create_child: F
+    ) -> Self {
         Self {
-            state,
-            create_child
+            create_state,
+            create_child,
+            data: PhantomData
         }
     }
 }
@@ -43,8 +54,9 @@ impl<T, E: Element, F: FnOnce(StateHandle<State<T>>) -> E> AppState<T, E, F> {
 impl<
     T: 'static,
     E: Element + 'static,
-    F: FnOnce(StateHandle<State<T>>) -> E
-> Element for AppState<T, E, F> {
+    S: FnOnce(&mut InitCtx) -> T,
+    F: FnOnce(&mut T, StateHandle<State<T>>) -> E
+> Element for AppState<T, E, S, F> {
     type Widget = StateWidget<T>;
     type Message = Message<T>;
 
@@ -52,14 +64,14 @@ impl<
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let handle = StateHandle::new(ctx.active);
+        let mut state = (self.create_state)(ctx);
+        let handle = StateHandle::new(ctx.active());
+
+        let child = ctx.new_child((self.create_child)(&mut state, handle)).into();
 
         (
             StateWidget { data: PhantomData },
-            State {
-                state: self.state,
-                child: ctx.new_child((self.create_child)(handle)).into()
-            }
+            State { state, child }
         )
     }
 

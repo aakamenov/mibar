@@ -73,22 +73,22 @@ pub trait AnyWidget {
 impl<T: Widget> AnyWidget for T {
     #[inline]
     fn layout(&self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
-        <T as Widget>::layout(StateHandle::new(ctx.active), ctx, bounds)
+        <T as Widget>::layout(StateHandle::new(ctx.active()), ctx, bounds)
     }
 
     #[inline]
     fn draw(&self, ctx: &mut DrawCtx, layout: Rect) {
-        <T as Widget>::draw(StateHandle::new(ctx.active), ctx, layout)
+        <T as Widget>::draw(StateHandle::new(ctx.active()), ctx, layout)
     }
 
     #[inline]
     fn event(&self, ctx: &mut UpdateCtx, event: &Event) {
-        <T as Widget>::event(StateHandle::new(ctx.active), ctx, event)
+        <T as Widget>::event(StateHandle::new(ctx.active()), ctx, event)
     }
 
     #[inline]
     fn task_result(&self, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
-        <T as Widget>::task_result(StateHandle::new(ctx.active), ctx, data)
+        <T as Widget>::task_result(StateHandle::new(ctx.active()), ctx, data)
     }
 
     #[inline]

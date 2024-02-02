@@ -21,7 +21,7 @@ use mibar::{
         side_panel::{self, SidePanel},
         WindowId, WindowDimensions
     },
-    Theme, Font, Family, Color, QuadStyle, StateHandle, run
+    Theme, Font, Family, Color, QuadStyle, StateHandle, ReactiveList, run
 };
 
 // Color palette: https://coolors.co/232f2e-293635-aca695-d9ddde-ff8000-70d900-ff4c57-00dbd7-ff64a2
@@ -49,7 +49,13 @@ const BAR_SIZE: u32 = 40;
 
 #[derive(Debug)]
 struct BarState {
-    power_menu: Option<WindowId>
+    power_menu: Option<WindowId>,
+    items: ReactiveList<Item>
+}
+
+#[derive(Debug)]
+struct Item {
+    text: String
 }
 
 fn main() {
@@ -97,38 +103,47 @@ fn theme() -> Theme {
 }
 
 fn build() -> impl Element {
-    let state = BarState {
-        power_menu: None
-    };
-
-    AppState::new(state, |handle| {
-        let create = move |builder: &mut FlexBuilder| {
-            let left = Flex::row(|builder| {
-                builder.add_non_flex(Workspaces::new(workspaces_style));
-                builder.add_non_flex(DateTime::new());
-            })
-            .spacing(SPACING);
+    AppState::new(|_| BarState { power_menu: None, items: ReactiveList::new() }, |state, handle| {
+        let list = state.items.clone();
+        let build = move |builder: &mut FlexBuilder| {
+            let left = Flex::row()
+                .spacing(SPACING)
+                .build(|builder| {
+                    builder.add_non_flex(Workspaces::new(workspaces_style));
+                    builder.add_non_flex(DateTime::new());
+                });
 
             builder.add_flex(left, 1f32);
+
+            let test = Flex::row()
+                .main_alignment(Alignment::End)
+                .spacing(SPACING)
+                .bind(&list, |ctx, item| {
+                    let id = ctx.new_child(Text::new(item.text.clone())).into();
+
+                    (id, None)
+                });
             
-            let right = Flex::row(|builder| {
-                builder.add_non_flex(KeyboardLayout::new(KEYBOARD_DEVICE));
-                builder.add_non_flex(PulseAudioVolume::new(format_audio));
-                builder.add_non_flex(Battery::new(BATTERY_DEVICE, Duration::from_secs(30), battery_style));
-                builder.add_non_flex(Cpu::new());
-                builder.add_non_flex(Ram::new());
-                builder.add_non_flex(boot_menu_button(handle));
-            })
-            .main_alignment(Alignment::End)
-            .spacing(SPACING);
+            let right = Flex::row()
+                .main_alignment(Alignment::End)
+                .spacing(SPACING)
+                .build(move |builder| {
+                    builder.add_non_flex(KeyboardLayout::new(KEYBOARD_DEVICE));
+                    builder.add_non_flex(PulseAudioVolume::new(format_audio));
+                    builder.add_non_flex(Battery::new(BATTERY_DEVICE, Duration::from_secs(30), battery_style));
+                    builder.add_non_flex(Cpu::new());
+                    builder.add_non_flex(Ram::new());
+                    builder.add_non_flex(boot_menu_button(handle));
+                });
 
             builder.add_flex(right, 1f32);
         };
 
-        Flex::row(create)
+        Flex::row()
             .spacing(SPACING)
             .padding(PADDING)
             .style(|| QuadStyle::solid_background(BASE))
+            .build(build)
     })
 }
 
@@ -183,11 +198,15 @@ fn boot_menu_panel() -> impl Element {
         }
     }
 
-    Flex::row(|builder| {
+    Flex::row()
+    .spacing(SPACING)
+    .padding(PADDING)
+    .style(|| QuadStyle::solid_background(BASE).with_border(1f32, OUTLINE))
+    .build(|builder| {
         const ICON_SIZE: f32 = 24f32;
 
         builder.add_non_flex({
-            let col = Flex::column(|builder| {
+            let col = Flex::column().build(|builder| {
                 builder.add_non_flex(Text::new("⏻").font(font_mono()).text_size(ICON_SIZE));
                 builder.add_non_flex(Text::new("Shutdown").font(font_mono()));
             });
@@ -202,7 +221,7 @@ fn boot_menu_panel() -> impl Element {
         });
 
         builder.add_non_flex({
-            let col = Flex::column(|builder| {
+            let col = Flex::column().build(|builder| {
                 builder.add_non_flex(Text::new("󰜉").font(font_mono()).text_size(ICON_SIZE));
                 builder.add_non_flex(Text::new("Reboot").font(font_mono()));
             });
@@ -216,9 +235,6 @@ fn boot_menu_panel() -> impl Element {
             .style(|state| button_style(state, PRIMARY_ORANGE))
         });
     })
-    .spacing(SPACING)
-    .padding(PADDING)
-    .style(|| QuadStyle::solid_background(BASE).with_border(1f32, OUTLINE))
 }
 
 fn battery_style(capacity: u8) -> battery::Style {

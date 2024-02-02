@@ -1,9 +1,9 @@
-use std::{marker::PhantomData, rc::Rc};
+use std::marker::PhantomData;
 
 use crate::{
     InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId, Event, Size,
     MouseEvent, MouseButton, Color, StateHandle, Quad, QuadStyle,
-    Rect, Action, ActionId
+    Rect, Action
 };
 use super::{
     container,
@@ -42,7 +42,7 @@ pub struct ButtonWidget<E: Element> {
 
 pub struct State<E: Element> {
     child: TypedId<E>,
-    on_click: ActionId,
+    on_click: Action,
     style: Option<StyleFn>,
     padding: Padding,
     width: Length,
@@ -69,7 +69,7 @@ impl<E: Element> Button<E> {
     ) -> Self {
         Self {
             child,
-            on_click: Rc::new(on_click),
+            on_click: Action::new(on_click),
             style: None,
             padding: Padding::from(4f32),
             width: Length::Fit,
@@ -114,13 +114,11 @@ impl<E: Element + 'static> Element for Button<E> {
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let on_click = ctx.register_action(self.on_click);
-
         (
             ButtonWidget { data: PhantomData },
             State {
                 child: ctx.new_child(self.child),
-                on_click,
+                on_click: self.on_click,
                 style: self.style,
                 is_hovered: false,
                 is_active: false,
@@ -199,8 +197,7 @@ impl<E: Element + 'static> Widget for ButtonWidget<E> {
                         ctx.ui.request_redraw();
                         state.is_active = false;
 
-                        let on_click = state.on_click;
-                        ctx.execute(on_click);                        
+                        ctx.event_queue.schedule(&state.on_click);
                     }
                 }
                 _ => { }

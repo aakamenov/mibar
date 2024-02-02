@@ -1,8 +1,14 @@
+use std::{marker::PhantomData, ops::Deref};
+
 use smallvec::SmallVec;
 
 use crate::{
     geometry::{Size, Rect},
     draw::{Quad, QuadStyle},
+    reactive::{
+        reactive_list::{ReactiveList, Binding, ListOp},
+        event_emitter::EventHandler
+    },
     InitCtx,DrawCtx, LayoutCtx,
     UpdateCtx, Event, Id, StateHandle
 };
@@ -12,9 +18,9 @@ use super::{
 };
 
 pub type StyleFn = fn() -> QuadStyle;
- 
-pub struct Flex<F: FnOnce(&mut FlexBuilder)> {
-    create: F,
+pub type CreateChildFn<T> = fn(&mut UpdateCtx, &T) -> (Id, Option<f32>);
+
+pub struct Flex {
     axis: Axis,
     main_alignment: Alignment,
     cross_alignment: Alignment,
@@ -23,33 +29,75 @@ pub struct Flex<F: FnOnce(&mut FlexBuilder)> {
     style: Option<StyleFn>
 }
 
-pub struct FlexBuilder<'a: 'b, 'b> {
-    ctx: &'b mut InitCtx<'a>,
-    children: SmallVec<[(Id, f32); 8]>
+pub struct StaticFlex<F: FnOnce(&mut FlexBuilder)> {
+    build: F,
+    params: Flex
 }
 
-pub struct FlexWidget;
+pub struct DynamicFlex<T> {
+    create: CreateChildFn<T>,
+    binding: Binding<T>,
+    params: Flex
+}
+
+pub struct FlexBuilder<'a: 'b, 'b> {
+    ctx: &'b mut InitCtx<'a>,
+    children: &'b mut SmallVec<[(Id, f32); 8]>
+}
+
+pub struct FlexWidget<T> {
+    data: PhantomData<T>
+}
 
 #[derive(Clone)]
-pub struct State {
+pub struct State<T> {
     children: SmallVec<[(Id, f32); 8]>,
     axis: Axis,
     main_alignment: Alignment,
     cross_alignment: Alignment,
     spacing: f32,
     padding: Padding,
-    style: Option<StyleFn>
+    style: Option<StyleFn>,
+    create_child: CreateChildFn<T> 
 }
 
-impl<F: FnOnce(&mut FlexBuilder)> Flex<F> {
+impl Flex {
     #[inline]
-    pub fn row(create: F) -> Self {
-        Self::new(create, Axis::Horizontal)
+    pub fn new(axis: Axis) -> Self {
+        Self {
+            axis,
+            main_alignment: Alignment::Start,
+            cross_alignment: Alignment::Center,
+            spacing: 0f32,
+            padding: Padding::ZERO,
+            style: None
+        }
     }
 
     #[inline]
-    pub fn column(create: F) -> Self {
-        Self::new(create, Axis::Vertical)
+    pub fn row() -> Self {
+        Self::new(Axis::Horizontal)
+    }
+
+    #[inline]
+    pub fn column() -> Self {
+        Self::new(Axis::Vertical)
+    }
+
+    #[inline]
+    pub fn build<F: FnOnce(&mut FlexBuilder) + 'static>(self, build: F) -> StaticFlex<F> {
+        StaticFlex { build, params: self }
+    }
+
+    #[inline]
+    pub fn bind<T: 'static>(
+        self,
+        list: &ReactiveList<T>,
+        create: CreateChildFn<T>
+    ) -> DynamicFlex<T> {
+        let binding = list.create_binding::<DynamicFlex<T>>();
+
+        DynamicFlex { create, binding, params: self }
     }
 
     #[inline]
@@ -86,19 +134,6 @@ impl<F: FnOnce(&mut FlexBuilder)> Flex<F> {
 
         self
     }
-
-    #[inline]
-    fn new(create: F, axis: Axis) -> Self {
-        Self {
-            create,
-            axis,
-            main_alignment: Alignment::Start,
-            cross_alignment: Alignment::Center,
-            spacing: 0f32,
-            padding: Padding::ZERO,
-            style: None
-        }
-    }
 }
 
 impl<'a: 'b, 'b> FlexBuilder<'a, 'b> {
@@ -131,37 +166,64 @@ impl<'a: 'b, 'b> FlexBuilder<'a, 'b> {
     }
 }
 
-impl<F: FnOnce(&mut FlexBuilder)> Element for Flex<F> {
-    type Widget = FlexWidget;
+impl<F: FnOnce(&mut FlexBuilder)> Element for StaticFlex<F> {
+    type Widget = FlexWidget<()>;
     type Message = ();
 
     fn make_widget(self, ctx: &mut InitCtx) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
+        let mut children = SmallVec::new();
         let mut builder = FlexBuilder {
             ctx,
-            children: SmallVec::new()
+            children: &mut children
         };
 
-        (self.create)(&mut builder);
+        (self.build)(&mut builder);
 
         let state = State {
-            children: builder.children,
-            axis: self.axis,
-            main_alignment: self.main_alignment,
-            cross_alignment: self.cross_alignment,
-            spacing: self.spacing,
-            padding: self.padding,
-            style: self.style
+            children,
+            axis: self.params.axis,
+            main_alignment: self.params.main_alignment,
+            cross_alignment: self.params.cross_alignment,
+            spacing: self.params.spacing,
+            padding: self.params.padding,
+            style: self.params.style,
+            create_child: |_, _| { unreachable!() }
         };
         
-        (FlexWidget, state)
+        (FlexWidget { data: PhantomData }, state)
     }
 }
 
-impl Widget for FlexWidget {
-    type State = State;
+impl<T: 'static> Element for DynamicFlex<T> {
+    type Widget = FlexWidget<T>;
+    type Message = ();
+
+    fn make_widget(self, ctx: &mut InitCtx) -> (
+        Self::Widget,
+        <Self::Widget as Widget>::State
+    ) {
+        self.binding.bind(ctx);
+
+        let state = State {
+            children: SmallVec::new(),
+            axis: self.params.axis,
+            main_alignment: self.params.main_alignment,
+            cross_alignment: self.params.cross_alignment,
+            spacing: self.params.spacing,
+            padding: self.params.padding,
+            style: self.params.style,
+            create_child: self.create
+        };
+        
+        (FlexWidget { data: PhantomData }, state)
+    }
+}
+
+impl<T: 'static> Widget for FlexWidget<T> {
+    type State = State<T>;
 
     // Simplified version of the Flutter flex layout algorithm:
     // https://api.flutter.dev/flutter/widgets/Flex-class.html
@@ -319,6 +381,32 @@ impl Widget for FlexWidget {
 
         for i in 0..children_len {
             ctx.event(ctx.tree[handle].children[i].0, event);
+        }
+    }
+}
+
+impl<T: 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
+    fn handle(
+        ctx: &mut UpdateCtx,
+        handle: StateHandle<Self::State>,
+        event: &ListOp<T>
+    ) {
+        match event {
+            ListOp::Init(items) => {
+                let state = &mut ctx.tree[handle];
+                let create_child = state.create_child;
+                state.children.reserve(items.as_slice().len());
+
+                for item in items.as_slice().deref() {
+                    let (id, flex) = create_child(ctx, item);
+                    ctx.tree[handle].children.push((id, flex.unwrap_or(0f32)));
+                }
+            }
+            ListOp::Push(item) => {
+                let create_child = ctx.tree[handle].create_child;
+                let (id, flex) = create_child(ctx, item);
+                ctx.tree[handle].children.push((id, flex.unwrap_or(0f32)));
+            }
         }
     }
 }

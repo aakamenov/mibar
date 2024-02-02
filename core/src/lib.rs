@@ -1,6 +1,8 @@
 pub mod widget;
+pub mod reactive;
 mod widget_tree;
 mod ui;
+mod event_queue;
 mod geometry;
 mod theme;
 mod renderer;
@@ -14,6 +16,8 @@ mod asset_loader;
 pub use client::run;
 pub use ui::*;
 pub use widget_tree::*;
+pub use event_queue::*;
+pub use reactive::*;
 pub use renderer::Renderer;
 pub use geometry::*;
 pub use theme::*;

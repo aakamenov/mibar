@@ -9,9 +9,15 @@ use std::{
 use slotmap::{SlotMap, SecondaryMap, Key, new_key_type};
 use smallvec::SmallVec;
 
-use crate::{widget::AnyWidget, Rect, UpdateCtx};
+use crate::{widget::AnyWidget, Rect, Id};
 
-pub type Action = Rc<dyn Fn(&mut UpdateCtx)>;
+pub trait ProvidesContext<C> {
+    fn context_handle(&self) -> ContextHandle<C>;
+}
+
+pub trait ContextLens<C, T>: ProvidesContext<C> {
+    fn lens(context: &mut C) -> &mut T;
+}
 
 pub struct StateHandle<T> {
     pub(crate) id: RawWidgetId,
@@ -27,13 +33,12 @@ pub struct WidgetTree {
     pub(crate) widgets: SlotMap<RawWidgetId, WidgetState>,
     pub(crate) parent_to_children: SecondaryMap<RawWidgetId, SmallVec<[RawWidgetId; 4]>>,
     pub(crate) child_to_parent: SecondaryMap<RawWidgetId, RawWidgetId>,
-    pub(crate) actions: SecondaryMap<RawWidgetId, SlotMap<RawActionId, Action>>,
-    pub(crate) contexts: SlotMap<RawContextId, Box<dyn Any + 'static>>
+    pub(crate) contexts: SlotMap<RawContextId, Box<dyn Any + 'static>>,
+    pub(crate) dependencies: SecondaryMap<RawWidgetId, SmallVec<[RawContextId; 2]>>
 }
 
 new_key_type! {
     pub(crate) struct RawWidgetId;
-    pub(crate) struct RawActionId;
     pub(crate) struct RawContextId;
 }
 
@@ -49,8 +54,8 @@ impl WidgetTree {
             widgets: SlotMap::with_capacity_and_key(20),
             parent_to_children: SecondaryMap::new(),
             child_to_parent: SecondaryMap::new(),
-            actions: SecondaryMap::new(),
-            contexts: SlotMap::with_key()
+            contexts: SlotMap::with_key(),
+            dependencies: SecondaryMap::new()
         }
     }
 
@@ -67,7 +72,7 @@ impl WidgetTree {
     }
 
     #[inline]
-    pub fn state_with_context<S: 'static, C: 'static>(
+    pub fn state_and_context<S: 'static, C: 'static>(
         &mut self,
         state: StateHandle<S>,
         context: ContextHandle<C>
@@ -76,6 +81,18 @@ impl WidgetTree {
             self.widgets[state.id].state.downcast_mut().unwrap(),
             self.contexts[context.id].downcast_mut().unwrap(),
         )
+    }
+
+    #[inline]
+    pub fn state_with_context<S: 'static, C: 'static>(
+        &mut self,
+        state: StateHandle<S>,
+        get: impl FnOnce(&S) -> ContextHandle<C>
+    ) -> (&mut S, &mut C) {
+        let state = self.widgets[state.id].state.downcast_mut().unwrap();
+        let context = self.contexts[get(&state).id].downcast_mut().unwrap();
+
+        (state, context)
     }
 
     #[inline]
@@ -88,6 +105,37 @@ impl WidgetTree {
     pub fn context_mut<C: 'static>(&mut self, handle: ContextHandle<C>) -> Option<&mut C> {
         self.contexts.get_mut(handle.id)
             .map(|x| x.downcast_mut().unwrap())
+    }
+
+    #[inline]
+    pub fn set_context<C: 'static>(&mut self, context: C) -> ContextHandle<C> {
+        let id = self.contexts.insert(Box::new(context));
+
+        ContextHandle::new(id)
+    }
+
+    #[inline]
+    pub fn set_context_dependency<C: 'static>(
+        &mut self,
+        owner: Id,
+        context: C
+    ) -> ContextHandle<C> {
+        let id = self.contexts.insert(Box::new(context));
+        let handle = ContextHandle::new(id);
+
+        let entry = self.dependencies.entry(owner.0)
+            .expect("Provided widget ID is not alive.")
+            .or_default();
+
+        entry.push(handle.id);
+
+        handle
+    }
+
+    #[inline]
+    pub fn remove_context<C: 'static>(&mut self, handle: ContextHandle<C>) -> Option<C> {
+        self.contexts.remove(handle.id)
+            .map(|x| *x.downcast().unwrap())
     }
 
     pub(crate) fn dealloc(&mut self, id: RawWidgetId) {
@@ -111,10 +159,12 @@ impl WidgetTree {
         }
 
         // We call destroy after we've deallocated the children as
-        // they could be relying on the parent being alive during their
-        // destroy() call (as is the case with StateHandle<T> in the State widget).
+        // they could be relying on the parent being alive during their destroy() call.
         widget.widget.destroy(widget.state);
-        self.actions.remove(id);
+
+        for id in self.dependencies.remove(id).unwrap_or_default() {
+            self.contexts.remove(id);
+        }
     }
 
     fn dealloc_impl(&mut self, id: RawWidgetId) {
@@ -131,10 +181,12 @@ impl WidgetTree {
         }
 
         // We call destroy after we've deallocated the children as
-        // they could be relying on the parent being alive during their
-        // destroy() call (as is the case with StateHandle<T> in the State widget).
+        // they could be relying on the parent being alive during their destroy() call.
         widget.widget.destroy(widget.state);
-        self.actions.remove(id);
+
+        for id in self.dependencies.remove(id).unwrap_or_default() {
+            self.contexts.remove(id);
+        }
     }
 }
 
@@ -226,5 +278,19 @@ impl<T> fmt::Debug for ContextHandle<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.id, f)
+    }
+}
+
+impl<C> ProvidesContext<C> for ContextHandle<C> {
+    #[inline]
+    fn context_handle(&self) -> ContextHandle<C> {
+        *self
+    }
+}
+
+impl<C> ContextLens<C, C> for ContextHandle<C> {
+    #[inline]
+    fn lens(context: &mut C) -> &mut C {
+        context
     }
 }

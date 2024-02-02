@@ -8,6 +8,7 @@ tokio.workspace = true
 smallvec.workspace = true
 smithay-client-toolkit = "0.18.0"
 tiny-skia = "0.11.1"
+bumpalo = "3.14.0"
 nohash = "0.2.0"
 slotmap = "1.0.7"
 ahash = "0.8.3"

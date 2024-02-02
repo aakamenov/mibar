@@ -1,24 +1,28 @@
 use std::{
-    fmt,
     any::Any,
     future::Future,
     marker::PhantomData,
     collections::VecDeque,
     hash::{Hash, Hasher},
-    rc::Rc
+    rc::Rc,
+    cell::RefCell,
+    fmt
 };
 
 use tiny_skia::PixmapMut;
 use tokio::{runtime, task::JoinHandle, sync::mpsc::UnboundedSender};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
 use slotmap::Key;
+use bumpalo::Bump;
+use smallvec::SmallVec;
 
 use crate::{
     geometry::{Rect, Size, Point},
     widget_tree::{
         WidgetTree, WidgetState, RawWidgetId,
-        RawActionId, StateHandle, ContextHandle, Action
+        StateHandle, ContextHandle
     },
+    event_queue::{EventQueue, EventType},
     widget::{Element, Widget, AnyWidget, SizeConstraints},
     theme::Theme,
     renderer::{Renderer, ImageCacheHandle},
@@ -54,38 +58,34 @@ pub struct TypedId<E: Element> {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub struct Id(RawWidgetId);
-
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub struct ActionId {
-    widget: RawWidgetId,
-    action: RawActionId
-}
+pub struct Id(pub(crate) RawWidgetId);
 
 pub struct LayoutCtx<'a> {
     pub ui: &'a mut UiCtx,
     pub tree: &'a mut WidgetTree,
     pub renderer: &'a mut Renderer,
-    pub(crate) active: RawWidgetId
+    active: RawWidgetId
 }
 
 pub struct DrawCtx<'a> {
     pub ui: &'a mut UiCtx,
     pub tree: &'a mut WidgetTree,
     pub renderer: &'a mut Renderer,
-    pub(crate) active: RawWidgetId
+    active: RawWidgetId
 }
 
 pub struct UpdateCtx<'a> {
     pub ui: &'a mut UiCtx,
     pub tree: &'a mut WidgetTree,
-    pub(crate) active: RawWidgetId
+    pub event_queue: &'a EventQueue<'a>,
+    active: RawWidgetId
 }
 
 pub struct InitCtx<'a> {
     pub ui: &'a mut UiCtx,
-    pub(crate) tree: &'a mut WidgetTree,
-    pub(crate) active: RawWidgetId
+    pub tree: &'a mut WidgetTree,
+    pub event_queue: &'a EventQueue<'a>,
+    active: RawWidgetId
 }
 
 #[derive(Debug)]
@@ -120,6 +120,7 @@ pub(crate) enum UiEvent {
 pub(crate) struct Ui {
     pub(crate) renderer: Renderer,
     pub(crate) ctx: UiCtx,
+    alloc: Bump,
     tree: WidgetTree,
     root: Id,
     size: Size
@@ -136,6 +137,8 @@ impl Ui {
     ) -> Self {
         let mut renderer = Renderer::new();
         let mut tree = WidgetTree::new();
+        let alloc = Bump::new();
+
         let mut ctx = UiCtx {
             theme,
             mouse_pos: None,
@@ -148,9 +151,15 @@ impl Ui {
             window_id
         };
 
+        let buffer = RefCell::new(Vec::with_capacity(8));
+
         let mut init_ctx = InitCtx {
             tree: &mut tree,
             ui: &mut ctx,
+            event_queue: &EventQueue {
+                alloc: &alloc,
+                buffer: &buffer
+            },
             active: RawWidgetId::null()
         };
 
@@ -159,6 +168,7 @@ impl Ui {
         Self {
             ctx,
             renderer,
+            alloc,
             tree,
             root: root.into(),
             size: Size::ZERO
@@ -204,13 +214,20 @@ impl Ui {
             _ => { }
         }
 
+        let buffer = RefCell::new(Vec::with_capacity(8));
+
         let mut ctx = UpdateCtx {
             tree: &mut self.tree,
             ui: &mut self.ctx,
+            event_queue: &EventQueue {
+                alloc: &self.alloc,
+                buffer: &buffer
+            },
             active: RawWidgetId::null()
         };
 
         ctx.event(self.root, &event);
+        ctx.execute_events();
     }
 
     pub fn task_result(&mut self, result: TaskResult) {
@@ -220,13 +237,20 @@ impl Ui {
         };
 
         let widget = Rc::clone(&state.widget);
+        let buffer = RefCell::new(Vec::with_capacity(8));
+
         let mut ctx = UpdateCtx {
             tree: &mut self.tree,
             ui: &mut self.ctx,
+            event_queue: &EventQueue {
+                alloc: &self.alloc,
+                buffer: &buffer
+            },
             active: result.id
         };
 
         widget.task_result(&mut ctx, result.data);
+        ctx.execute_events();
     }
 
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
@@ -435,29 +459,15 @@ impl<'a> UpdateCtx<'a> {
     }
 
     #[inline]
-    pub fn execute(&mut self, id: ActionId) -> bool {
-        let Some(actions) = self.tree.actions.get(id.widget) else {
-            return false;
-        };
-
-        if let Some(action) = actions.get(id.action).map(|x| Rc::clone(x)) {
-            action(self);
-
-            true
-        } else {
-            false
-        }
-    }
-
-    #[inline]
-    pub fn new_child<E: Element>(&mut self, el: E) -> TypedId<E>
+    pub fn new_child<E: Element>(&'a mut self, el: E) -> TypedId<E>
         where E::Widget: AnyWidget
     {
         self.ui.request_layout();
-        
+
         let mut ctx = InitCtx {
             active: self.active,
             tree: self.tree,
+            event_queue: self.event_queue,
             ui: self.ui
         };
 
@@ -544,12 +554,18 @@ impl<'a> UpdateCtx<'a> {
         ).unwrap();
     }
 
-    #[inline]
-    pub fn as_init_ctx<'b: 'a>(&'b mut self) -> InitCtx<'a> {
-        InitCtx {
-            active: self.active,
-            tree: self.tree,
-            ui: self.ui
+    fn execute_events(&mut self) {
+        let mut events: SmallVec<[EventType<'a>; 16]> = SmallVec::new();
+        events.extend(self.event_queue.buffer.borrow_mut().drain(..).rev());
+
+        while let Some(event) = events.pop() {
+            match event {
+                EventType::Action(action) => {
+                    action.invoke(self);
+                    events.extend(self.event_queue.buffer.borrow_mut().drain(..).rev());
+                }
+                EventType::Destroy(id) => self.destroy_child(id)
+            }
         }
     }
 }
@@ -622,17 +638,24 @@ macro_rules! impl_context_method {
 
 impl_context_method! {
     InitCtx<'_>,
+    LayoutCtx<'_>,
     UpdateCtx<'_>,
+    DrawCtx<'_>,
     {
         #[inline]
-        pub fn register_action(&mut self, action: Action) -> ActionId {
-            let actions = self.tree.actions.entry(self.active)
-                .unwrap()
-                .or_default();
+        pub(crate) fn active(&self) -> RawWidgetId {
+            self.active
+        }
+    }
+}
 
-            let action = actions.insert(action);
-
-            ActionId { widget: self.active, action }
+impl_context_method! {
+    InitCtx<'_>,
+    UpdateCtx<'_>,
+    {   
+        #[inline]
+        pub fn id(&self) -> Id {
+            Id(self.active)
         }
 
         #[inline]
