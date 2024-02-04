@@ -5,12 +5,17 @@ use std::{
     fmt
 };
 
-use crate::{widget::Element, TypedId, Id, EventQueue};
-use super::event_emitter::{self, EventEmitter, EventHandler, Event};
+use crate::{widget::Element, TypedId, Id, EventQueue, Context, EventSource};
+use super::event_emitter::{self, EventEmitter, EventHandler};
 
 pub struct ReactiveList<T> {
     items: Rc<RefCell<Vec<T>>>,
     emitter: EventEmitter<ListOp<T>>
+}
+
+pub struct Event<T> {
+    callback: Option<Box<dyn FnOnce(&mut Context)>>,
+    inner: event_emitter::Event<ListOp<T>>
 }
 
 pub enum ListOp<T> {
@@ -73,18 +78,20 @@ impl<T> ReactiveList<T> {
 
     #[inline]
     #[must_use = "You should give this to ctx.event_queue.schedule()."]
-    pub fn push(&self, item: T) -> Event<ListOp<T>>
+    pub fn push(&self, item: T) -> Event<T>
         where T: 'static
     {
         let items = self.items.clone();
 
-        self.emitter.emit(ListOp::Push(item)).and_then(move |_, event| {
+        let inner = self.emitter.emit(ListOp::Push(item)).and_then(move |_, event| {
             let ListOp::Push(item) = event else {
                 unreachable!();
             };
 
             items.borrow_mut().push(item);
-        })
+        });
+
+        Event { callback: None, inner }
     }
 
     #[inline]
@@ -95,6 +102,30 @@ impl<T> ReactiveList<T> {
         let op = ListOp::Init(ListRef(self.items.clone()));
 
         queue.schedule(subscriber.emit(op));
+    }
+}
+
+impl<E> Event<E> {
+    #[inline]
+    #[must_use = "You should give this to ctx.event_queue.schedule()."]
+    pub fn and_then(
+        mut self,
+        callback: impl FnOnce(&mut Context) + 'static
+    ) -> Self {
+        self.callback = Some(Box::new(callback));
+
+        self
+    }
+}
+
+impl<E: 'static> EventSource for Event<E> {
+    #[inline]
+    fn emit(self, queue: &EventQueue) {
+        self.inner.emit(queue);
+
+        if let Some(callback) = self.callback {
+            queue.action(callback);
+        }
     }
 }
 
