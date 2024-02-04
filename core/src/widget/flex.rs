@@ -9,8 +9,7 @@ use crate::{
         reactive_list::{ReactiveList, Binding, ListOp},
         event_emitter::EventHandler
     },
-    InitCtx,DrawCtx, LayoutCtx,
-    UpdateCtx, Event, Id, StateHandle
+    DrawCtx, LayoutCtx, Context, Event, Id, StateHandle
 };
 use super::{
     SizeConstraints, Padding,
@@ -18,7 +17,7 @@ use super::{
 };
 
 pub type StyleFn = fn() -> QuadStyle;
-pub type CreateChildFn<T> = fn(&mut UpdateCtx, &T) -> (Id, Option<f32>);
+pub type CreateChildFn<T> = fn(DynamicFlexBuilder, &T) -> (Id, f32);
 
 pub struct Flex {
     axis: Axis,
@@ -29,7 +28,7 @@ pub struct Flex {
     style: Option<StyleFn>
 }
 
-pub struct StaticFlex<F: FnOnce(&mut FlexBuilder)> {
+pub struct StaticFlex<F: FnOnce(&mut StaticFlexBuilder)> {
     build: F,
     params: Flex
 }
@@ -40,9 +39,15 @@ pub struct DynamicFlex<T> {
     params: Flex
 }
 
-pub struct FlexBuilder<'a: 'b, 'b> {
-    ctx: &'b mut InitCtx<'a>,
+pub struct StaticFlexBuilder<'a: 'b, 'b> {
+    id: Id,
+    ctx: &'b mut Context<'a>,
     children: &'b mut SmallVec<[(Id, f32); 8]>
+}
+
+pub struct DynamicFlexBuilder<'a: 'b, 'b> {
+    id: Id,
+    ctx: &'b mut Context<'a>
 }
 
 pub struct FlexWidget<T> {
@@ -85,7 +90,7 @@ impl Flex {
     }
 
     #[inline]
-    pub fn build<F: FnOnce(&mut FlexBuilder) + 'static>(self, build: F) -> StaticFlex<F> {
+    pub fn build<F: FnOnce(&mut StaticFlexBuilder) + 'static>(self, build: F) -> StaticFlex<F> {
         StaticFlex { build, params: self }
     }
 
@@ -136,22 +141,22 @@ impl Flex {
     }
 }
 
-impl<'a: 'b, 'b> FlexBuilder<'a, 'b> {
+impl<'a: 'b, 'b> StaticFlexBuilder<'a, 'b> {
     #[inline]
-    pub fn add_non_flex(
+    pub fn non_flex(
         &mut self,
         child: impl Element
     ) {
-        self.add_flex(child, 0f32);
+        self.flex(child, 0f32);
     }
 
     #[inline]
-    pub fn add_flex(
+    pub fn flex(
         &mut self,
         child: impl Element,
         flex: f32
     ) {
-        let id = self.ctx.new_child(child);
+        let id = self.ctx.new_child(self.id, child);
         self.children.push((id.into(), flex));
     }
 
@@ -166,16 +171,31 @@ impl<'a: 'b, 'b> FlexBuilder<'a, 'b> {
     }
 }
 
-impl<F: FnOnce(&mut FlexBuilder)> Element for StaticFlex<F> {
+impl<'a: 'b, 'b> DynamicFlexBuilder<'a, 'b> {
+    #[inline]
+    pub fn non_flex(self, child: impl Element) -> (Id, f32) {
+        self.flex(child, 0f32)
+    }
+
+    #[inline]
+    pub fn flex(self, child: impl Element, flex: f32) -> (Id, f32) {
+        let id = self.ctx.new_child(self.id, child);
+
+        (id.into(), flex)
+    }
+}
+
+impl<F: FnOnce(&mut StaticFlexBuilder)> Element for StaticFlex<F> {
     type Widget = FlexWidget<()>;
     type Message = ();
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
         let mut children = SmallVec::new();
-        let mut builder = FlexBuilder {
+        let mut builder = StaticFlexBuilder {
+            id,
             ctx,
             children: &mut children
         };
@@ -201,11 +221,11 @@ impl<T: 'static> Element for DynamicFlex<T> {
     type Widget = FlexWidget<T>;
     type Message = ();
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        self.binding.bind(ctx);
+        self.binding.bind(id, ctx.event_queue);
 
         let state = State {
             children: SmallVec::new(),
@@ -376,7 +396,7 @@ impl<T: 'static> Widget for FlexWidget<T> {
         }
     }
 
-    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
+    fn event(handle: StateHandle<Self::State>, ctx: &mut Context, event: &Event) {
         let children_len = ctx.tree[handle].children.len();
 
         for i in 0..children_len {
@@ -387,25 +407,29 @@ impl<T: 'static> Widget for FlexWidget<T> {
 
 impl<T: 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
     fn handle(
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         handle: StateHandle<Self::State>,
         event: &ListOp<T>
     ) {
         match event {
             ListOp::Init(items) => {
+                let id = handle.id();
                 let state = &mut ctx.tree[handle];
                 let create_child = state.create_child;
+
                 state.children.reserve(items.as_slice().len());
 
                 for item in items.as_slice().deref() {
-                    let (id, flex) = create_child(ctx, item);
-                    ctx.tree[handle].children.push((id, flex.unwrap_or(0f32)));
+                    let result = create_child(DynamicFlexBuilder { id, ctx }, item);
+                    ctx.tree[handle].children.push(result);
                 }
             }
             ListOp::Push(item) => {
+                let id = handle.id();
                 let create_child = ctx.tree[handle].create_child;
-                let (id, flex) = create_child(ctx, item);
-                ctx.tree[handle].children.push((id, flex.unwrap_or(0f32)));
+
+                let result = create_child(DynamicFlexBuilder { id, ctx }, item);
+                ctx.tree[handle].children.push(result);
             }
         }
     }

@@ -1,7 +1,7 @@
 use crate::{
     asset_loader::{AssetSource, AssetDataSource, AssetId, LoadResult},
     renderer::ImageCacheHandle,
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, Size, Rect, StateHandle
+    DrawCtx, LayoutCtx, Context, Size, Rect, StateHandle, Id
 
 };
 use super::{Element, Widget, SizeConstraints};
@@ -35,7 +35,7 @@ impl Element for Image {
     type Widget = ImageWidget;
     type Message = Message;
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, widget_id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
@@ -43,7 +43,7 @@ impl Element for Image {
         let mut handle = ctx.ui.image_cache_handle;
 
         if !handle.increase_ref_count(id) {
-            ctx.load_asset(self.source);
+            ctx.load_asset(widget_id, self.source);
         }
 
         (ImageWidget, State { id, handle })
@@ -51,7 +51,7 @@ impl Element for Image {
 
     fn message(
         handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         msg: Self::Message
     ) {
         let state = &mut ctx.tree[handle];
@@ -68,7 +68,7 @@ impl Element for Image {
                 state.id = id;
 
                 if !state.handle.increase_ref_count(id) {
-                    ctx.load_asset(source);
+                    ctx.load_asset(handle.id(), source);
                 } else {
                     ctx.ui.request_layout();
                 }
@@ -95,7 +95,7 @@ impl Widget for ImageWidget {
 
     fn task_result(
         handle: StateHandle<Self::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         data: Box<dyn std::any::Any>
     ) {
         let result = data.downcast::<LoadResult>().unwrap();

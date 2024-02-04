@@ -18,12 +18,12 @@ use super::{
     wayland_window::{WaylandWindow, WindowSurface, State},
     WindowEvent, WindowDimensions
 };
-use crate::{ui::{Ui, UiEvent}, Size, Rect};
+use crate::{Ui, UiEvent, Id, Size, Rect};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Location {
     Cursor,
-    WidgetBounds,
+    WidgetBounds(Id),
     Bounds(Rect)
 }
 

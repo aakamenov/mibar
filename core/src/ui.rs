@@ -1,6 +1,5 @@
 use std::{
     any::Any,
-    future::Future,
     marker::PhantomData,
     collections::VecDeque,
     hash::{Hash, Hasher},
@@ -32,7 +31,8 @@ use crate::{
     },
     client::{UiRequest, WindowId, WindowAction},
     window::Window,
-    asset_loader::{self, AssetSource}
+    asset_loader::{self, AssetSource},
+    task::AsyncTask
 };
 
 pub struct TaskResult {
@@ -51,7 +51,7 @@ pub struct TypedId<E: Element> {
     id: Id,
     message: fn(
         StateHandle<<E::Widget as Widget>::State>,
-        &mut UpdateCtx,
+        &mut Context,
         E::Message
     ),
     data: PhantomData<E>
@@ -60,32 +60,22 @@ pub struct TypedId<E: Element> {
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct Id(pub(crate) RawWidgetId);
 
+pub struct Context<'a> {
+    pub ui: &'a mut UiCtx,
+    pub tree: &'a mut WidgetTree,
+    pub event_queue: &'a EventQueue<'a>
+}
+
 pub struct LayoutCtx<'a> {
     pub ui: &'a mut UiCtx,
     pub tree: &'a mut WidgetTree,
-    pub renderer: &'a mut Renderer,
-    active: RawWidgetId
+    pub renderer: &'a mut Renderer
 }
 
 pub struct DrawCtx<'a> {
     pub ui: &'a mut UiCtx,
     pub tree: &'a mut WidgetTree,
-    pub renderer: &'a mut Renderer,
-    active: RawWidgetId
-}
-
-pub struct UpdateCtx<'a> {
-    pub ui: &'a mut UiCtx,
-    pub tree: &'a mut WidgetTree,
-    pub event_queue: &'a EventQueue<'a>,
-    active: RawWidgetId
-}
-
-pub struct InitCtx<'a> {
-    pub ui: &'a mut UiCtx,
-    pub tree: &'a mut WidgetTree,
-    pub event_queue: &'a EventQueue<'a>,
-    active: RawWidgetId
+    pub renderer: &'a mut Renderer
 }
 
 #[derive(Debug)]
@@ -137,7 +127,7 @@ impl Ui {
     ) -> Self {
         let mut renderer = Renderer::new();
         let mut tree = WidgetTree::new();
-        let alloc = Bump::new();
+        let mut alloc = Bump::new();
 
         let mut ctx = UiCtx {
             theme,
@@ -153,17 +143,18 @@ impl Ui {
 
         let buffer = RefCell::new(Vec::with_capacity(8));
 
-        let mut init_ctx = InitCtx {
+        let mut init_ctx = Context {
             tree: &mut tree,
             ui: &mut ctx,
             event_queue: &EventQueue {
                 alloc: &alloc,
                 buffer: &buffer
-            },
-            active: RawWidgetId::null()
+            }
         };
 
-        let root = init_ctx.new_child(root);
+        let root = init_ctx.new_child(Id(RawWidgetId::null()), root);
+        init_ctx.execute_events();
+        alloc.reset();
 
         Self {
             ctx,
@@ -216,18 +207,18 @@ impl Ui {
 
         let buffer = RefCell::new(Vec::with_capacity(8));
 
-        let mut ctx = UpdateCtx {
+        let mut ctx = Context {
             tree: &mut self.tree,
             ui: &mut self.ctx,
             event_queue: &EventQueue {
                 alloc: &self.alloc,
                 buffer: &buffer
-            },
-            active: RawWidgetId::null()
+            }
         };
 
         ctx.event(self.root, &event);
         ctx.execute_events();
+        self.alloc.reset();
     }
 
     pub fn task_result(&mut self, result: TaskResult) {
@@ -239,18 +230,18 @@ impl Ui {
         let widget = Rc::clone(&state.widget);
         let buffer = RefCell::new(Vec::with_capacity(8));
 
-        let mut ctx = UpdateCtx {
+        let mut ctx = Context {
             tree: &mut self.tree,
             ui: &mut self.ctx,
             event_queue: &EventQueue {
                 alloc: &self.alloc,
                 buffer: &buffer
-            },
-            active: result.id
+            }
         };
 
-        widget.task_result(&mut ctx, result.data);
+        widget.task_result(Id(result.id), &mut ctx, result.data);
         ctx.execute_events();
+        self.alloc.reset();
     }
 
     pub fn draw<'a: 'b, 'b>(&'a mut self, pixmap: &'b mut PixmapMut<'b>) {
@@ -261,8 +252,7 @@ impl Ui {
         let mut ctx = DrawCtx {
             renderer: &mut self.renderer,
             tree: &mut self.tree,
-            ui: &mut self.ctx,
-            active: RawWidgetId::null()
+            ui: &mut self.ctx
         };
 
         ctx.draw(self.root);
@@ -294,8 +284,7 @@ impl Ui {
         let mut ctx = LayoutCtx {
             renderer: &mut self.renderer,
             tree: &mut self.tree,
-            ui: &mut self.ctx,
-            active: RawWidgetId::null()
+            ui: &mut self.ctx
         };
 
         let size = ctx.layout(self.root, constraints);
@@ -386,25 +375,36 @@ impl UiCtx {
     pub fn runtime_handle(&self) -> &runtime::Handle {
         &self.rt_handle
     }
+
+    #[inline]
+    pub fn value_sender<T: Send + 'static>(&self, id: impl Into<Id>) -> ValueSender<T> {
+        ValueSender::new(
+            id.into().0,
+            self.task_send.clone()
+        )
+    }
+
+    #[inline]
+    #[must_use = r"It is your responsibility to abort long running or infinite loop
+tasks if you don't need them anymore using the handle returned by this method.
+You can ignore the return value otherwise."]
+    pub fn spawn<T: AsyncTask>(&self, task: T) -> JoinHandle<()> {
+        task.spawn(self)
+    }
 }
 
 impl<'a> LayoutCtx<'a> {
     #[inline]
     pub fn layout(&mut self, id: impl Into<Id>, bounds: SizeConstraints) -> Size {
-        let next = id.into().0;
+        let id = id.into().0;
 
-        let state = &mut self.tree.widgets[next];
+        let state = &mut self.tree.widgets[id];
         state.layout = Rect::default();
 
-        let active = self.active;
         let widget = Rc::clone(&state.widget);
 
-        self.active = next;
-
-        let size = widget.layout(self, bounds);
-        self.tree.widgets[next].layout.set_size(size);
-
-        self.active = active;
+        let size = widget.layout(Id(id), self, bounds);
+        self.tree.widgets[id].layout.set_size(size);
 
         size
     }
@@ -422,56 +422,53 @@ impl<'a> LayoutCtx<'a> {
     }
 }
 
-impl<'a> UpdateCtx<'a> {
+impl<'a> Context<'a> {
     #[inline]
     pub fn event(&mut self, id: impl Into<Id>, event: &Event) {
-        let next = id.into().0;
-        let state = &mut self.tree.widgets[next];
+        let id = id.into();
+        let state = &mut self.tree.widgets[id.0];
 
-        let active = self.active;
         let widget = Rc::clone(&state.widget);
 
-        self.active = next;
-        widget.event(self, event);
-        self.active = active;
-    }
-
-    #[inline]
-    pub fn layout(&self) -> Rect {
-        self.tree.widgets[self.active].layout
-    }
-
-    #[inline]
-    pub fn is_hovered(&self) -> bool {
-        let layout = self.layout();
-
-        self.ui.is_hovered(layout)
+        widget.event(id, self, event);
     }
 
     #[inline]
     pub fn message<E: Element>(&mut self, id: TypedId<E>, msg: E::Message) {
-        let next = id.raw();
-        let active = self.active;
-
-        self.active = next;
-        (id.message)(StateHandle::new(next), self, msg);
-        self.active = active;
+        (id.message)(StateHandle::new(id.raw()), self, msg);
     }
 
-    #[inline]
-    pub fn new_child<E: Element>(&'a mut self, el: E) -> TypedId<E>
+    pub fn new_child<E: Element>(&mut self, parent: impl Into<Id>, el: E) -> TypedId<E>
         where E::Widget: AnyWidget
     {
+        let parent = parent.into().0;
         self.ui.request_layout();
 
-        let mut ctx = InitCtx {
-            active: self.active,
-            tree: self.tree,
-            event_queue: self.event_queue,
-            ui: self.ui
-        };
+        // Hack, so we can get a key from the SlotMap
+        let child = self.tree.widgets.insert(
+            WidgetState::new(Rc::new(null_widget::NullWidget), Box::new(null_widget::State))
+        );
 
-        ctx.new_child(el)
+        let (widget, state) = el.make_widget(Id(child), self);
+
+        let state = WidgetState::new(Rc::new(widget), Box::new(state));
+        self.tree.widgets[child] = state;
+
+        self.tree.child_to_parent.insert(child, parent);
+
+        match self.tree.parent_to_children.entry(parent) {
+            Some(entry) => entry.or_default().push(child),
+            None => {
+                // We've reached the root widget which has no parent.
+                assert_eq!(parent, RawWidgetId::null());
+            }
+        }
+
+        TypedId {
+            id: Id(child),
+            message: E::message,
+            data: PhantomData
+        }
     }
 
     /// Destroys the given widget and all its children **immediately**.
@@ -513,15 +510,13 @@ impl<'a> UpdateCtx<'a> {
                     .surface()
                     .expect("attempting to open a popup during Ui init");
 
-                let pos = self.ui.mouse_pos();
                 let anchor_rect = match popup.location {
-                    popup::Location::Cursor if pos.is_some()  => {
-                        let pos = pos.unwrap();
-
+                    popup::Location::Cursor => {
+                        let pos = self.ui.mouse_pos().unwrap_or_default();
                         Rect::new(pos.x, pos.y, 1f32, 1f32)
                     }
-                    popup::Location::WidgetBounds | popup::Location::Cursor =>
-                        self.layout(),
+                    popup::Location::WidgetBounds(id) =>
+                        self.tree.widgets[id.0].layout,
                     popup::Location::Bounds(rect) => rect
                 };
 
@@ -554,6 +549,20 @@ impl<'a> UpdateCtx<'a> {
         ).unwrap();
     }
 
+    pub(crate) fn load_asset(&self, id: impl Into<Id>, source: impl Into<AssetSource>) {
+        let sender = ValueSender::new(
+            id.into().0,
+            self.ui.task_send.clone()
+        );
+
+        let job = asset_loader::Job {
+            sender,
+            source: source.into()
+        };
+
+        asset_loader::load(job);
+    }
+
     fn execute_events(&mut self) {
         let mut events: SmallVec<[EventType<'a>; 16]> = SmallVec::new();
         events.extend(self.event_queue.buffer.borrow_mut().drain(..).rev());
@@ -561,7 +570,9 @@ impl<'a> UpdateCtx<'a> {
         while let Some(event) = events.pop() {
             match event {
                 EventType::Action(action) => {
-                    action.invoke(self);
+                    // Safety: we only call this function once, this will also invoke the drop code
+                    // and the memory will be released by the allocator at the end of this method.
+                    unsafe { action.invoke(self); }
                     events.extend(self.event_queue.buffer.borrow_mut().drain(..).rev());
                 }
                 EventType::Destroy(id) => self.destroy_child(id)
@@ -573,176 +584,13 @@ impl<'a> UpdateCtx<'a> {
 impl<'a> DrawCtx<'a> {
     #[inline]
     pub fn draw(&mut self, id: impl Into<Id>) {
-        let next = id.into().0;
-        let state = &mut self.tree.widgets[next];
+        let id = id.into().0;
+        let state = &mut self.tree.widgets[id];
 
-        let active = self.active;
         let widget = Rc::clone(&state.widget);
         let layout = state.layout;
 
-        self.active = next;
-        widget.draw(self, layout);
-        self.active = active;
-    }
-}
-
-impl<'a> InitCtx<'a> {
-    pub fn new_child<E: Element>(&mut self, el: E) -> TypedId<E>
-        where E::Widget: AnyWidget
-    {
-        // Hack, so we can get a key from the SlotMap
-        let child = self.tree.widgets.insert(
-            WidgetState::new(Rc::new(null_widget::NullWidget), Box::new(null_widget::State))
-        );
-
-        let parent = self.active;
-        self.active = child;
-
-        let (widget, state) = el.make_widget(self);
-
-        self.active = parent;
-
-        let state = WidgetState::new(Rc::new(widget), Box::new(state));
-        self.tree.widgets[child] = state;
-
-        self.tree.child_to_parent.insert(child, parent);
-
-        match self.tree.parent_to_children.entry(parent) {
-            Some(entry) => entry.or_default().push(child),
-            None => {
-                // We've reached the root widget which has no parent.
-                assert_eq!(parent, RawWidgetId::null());
-            }
-        }
-
-        TypedId {
-            id: Id(child),
-            message: E::message,
-            data: PhantomData
-        }
-    }
-}
-
-// Copied from Xilem:
-// https://github.com/linebender/xilem/blob/0759de95bd1f20bd28c84b517177c5b9a7aa4c61/src/widget/contexts.rs#L110
-macro_rules! impl_context_method {
-    ($ty:ty,  { $($method:item)+ } ) => {
-        impl $ty { $($method)+ }
-    };
-    
-    ( $ty:ty, $($more:ty),+, { $($method:item)+ } ) => {
-        impl_context_method!($ty, { $($method)+ });
-        impl_context_method!($($more),+, { $($method)+ });
-    };
-}
-
-impl_context_method! {
-    InitCtx<'_>,
-    LayoutCtx<'_>,
-    UpdateCtx<'_>,
-    DrawCtx<'_>,
-    {
-        #[inline]
-        pub(crate) fn active(&self) -> RawWidgetId {
-            self.active
-        }
-    }
-}
-
-impl_context_method! {
-    InitCtx<'_>,
-    UpdateCtx<'_>,
-    {   
-        #[inline]
-        pub fn id(&self) -> Id {
-            Id(self.active)
-        }
-
-        #[inline]
-        pub fn value_sender<T: Send + 'static>(&self) -> ValueSender<T> {
-            ValueSender::new(
-                self.active,
-                self.ui.task_send.clone()
-            )
-        }
-
-        #[inline]
-        #[doc = r"A fire and forget type task that does not produce any result.
-This will NOT call [`Widget::task_result`] when complete."]
-        #[must_use = r"It is your responsibility to abort long running or infinite loop
-tasks if you don't need them anymore using the handle returned by this method.
-You can ignore the return value otherwise."]
-        pub fn task_void(
-            &self,
-            task: impl Future<Output = ()> + Send + 'static
-        ) -> JoinHandle<()> {
-            self.ui.rt_handle.spawn(task)
-        }
-
-        #[doc = r"A task that produces a single value and when complete calls
-[`Widget::task_result`] on the widget that initiated this method with the
-value produced by the async computation. You MUST implement
-[`Widget::task_result`] if you are using this method in your widget. If you
-don't, the default implementation is a panic which will remind you of that."]
-        #[must_use = r"It is your responsibility to abort long running or infinite loop
-tasks if you don't need them anymore using the handle returned by this method.
-You can ignore the return value otherwise."]
-        pub fn task<T: Send + 'static>(
-            &self,
-            task: impl Future<Output = T> + Send + 'static
-        ) -> JoinHandle<()> {
-            let tx = self.ui.task_send.clone();
-            let id = self.active;
-            let window_id = self.ui.window_id();
-    
-            self.ui.rt_handle.spawn(async move {
-                let result = task.await;
-                let result = TaskResult {
-                    id,
-                    data: Box::new(result)
-                };
-
-                if tx.send(result).is_err() {
-                    eprintln!("Failed to send task result to window {:?} - it has already closed.", window_id);
-                }
-            })
-        }
-    
-        #[doc = r"A task that can produce multiple values. For each value produced
-[`Widget::task_result`] is called on the widget that initiated this method
-with the value sent by the `ValueSender`. You MUST implement
-[`Widget::task_result`] if you are using this method in your widget. If you
-don't, the default implementation is a panic which will remind you of that."]
-        #[must_use = r"It is your responsibility to abort long running or infinite loop
-tasks if you don't need them anymore using the handle returned by this method.
-You can ignore the return value otherwise."]
-        pub fn task_with_sender<T: Send + 'static, Fut>(
-            &self,
-            create_future: impl FnOnce(ValueSender<T>) -> Fut
-        ) -> JoinHandle<()>
-            where Fut: Future<Output = ()> + Send + 'static
-        {
-            let sender = ValueSender::new(
-                self.active,
-                self.ui.task_send.clone()
-            );
-    
-            self.ui.rt_handle.spawn(create_future(sender))
-        }
-
-        pub(crate) fn load_asset(&self, source: impl Into<AssetSource>) {
-            let sender = ValueSender::new(
-                self.active,
-                self.ui.task_send.clone()
-            );
-
-            let job = asset_loader::Job {
-                sender,
-                source: source.into()
-            };
-
-            asset_loader::load(job);
-        }
+        widget.draw(Id(id), self, layout);
     }
 }
 
@@ -833,7 +681,7 @@ mod null_widget {
         type Widget = NullWidget;
         type Message = ();
 
-        fn make_widget(self, _ctx: &mut InitCtx) -> (
+        fn make_widget(self, _id: Id, _ctx: &mut Context) -> (
             Self::Widget,
             <Self::Widget as Widget>::State
         ) {

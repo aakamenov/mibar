@@ -3,7 +3,7 @@ use mibar_core::{
         text::{self, Text},
         Element, Widget, SizeConstraints
     },
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    DrawCtx, LayoutCtx, Context, Id, Task,
     ValueSender, TypedId, Size, Rect, StateHandle
 };
 
@@ -48,12 +48,12 @@ impl Element for Ram {
     type Widget = RamWidget;
     type Message = ();
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
         let mut rx = sys_info::RAM.subscribe(ctx.ui.runtime_handle());
-        let handle = ctx.task_with_sender(|sender: ValueSender<RamUsage>| {
+        let task = Task::with_sender(id, |sender: ValueSender<RamUsage>| {
             async move {
                 loop {
                     if let Ok(value) = rx.recv().await {
@@ -63,6 +63,8 @@ impl Element for Ram {
             }
         });
 
+        let handle = ctx.ui.spawn(task);
+
         let text = format(RamUsage::default());
         let text = match self.style {
             Some(style) => Text::new(text).style(style),
@@ -70,7 +72,7 @@ impl Element for Ram {
         };
 
         let state = State {
-            text: ctx.new_child(text),
+            text: ctx.new_child(id, text),
             handle
         };
 
@@ -87,7 +89,7 @@ impl Widget for RamWidget {
 
     fn task_result(
         handle: StateHandle<Self::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         data: Box<dyn std::any::Any>
     ) {
         let usage = *data.downcast::<RamUsage>().unwrap();

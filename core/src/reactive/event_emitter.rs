@@ -4,18 +4,19 @@ use smallvec::SmallVec;
 
 use crate::{
     widget::{Element, Widget},
-    InitCtx, UpdateCtx, RawWidgetId, TypedId,
+    Context, RawWidgetId, TypedId,
     StateHandle, EventSource, EventQueue, Id
 };
 
 type EventHandlerFn<E> = fn(
-    ctx: &mut UpdateCtx,
+    id: RawWidgetId,
+    ctx: &mut Context,
     event: &E
 );
 
 pub trait EventHandler<E>: Widget {
     fn handle(
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         handle: StateHandle<Self::State>,
         event: &E
     );
@@ -40,13 +41,13 @@ pub struct Subscriber<E> {
 pub struct Event<E> {
     event: E,
     state: Rc<RefCell<State<E>>>,
-    callback: Option<Box<dyn FnOnce(&mut UpdateCtx, E)>>
+    callback: Option<Box<dyn FnOnce(&mut Context, E)>>
 }
 
 pub struct SubscriberEvent<E> {
     event: E,
     subscriber: Subscriber<E>,
-    callback: Option<Box<dyn FnOnce(&mut UpdateCtx, E)>>
+    callback: Option<Box<dyn FnOnce(&mut Context, E)>>
 }
 
 #[derive(Debug)]
@@ -67,23 +68,11 @@ impl<E> EventEmitter<E> {
     }
 
     #[inline]
-    pub fn subscribe<T: Element>(&self, ctx: &mut InitCtx, _: &T)
+    pub fn subscribe<T: Element>(&self, id: &TypedId<T>)
         where T::Widget: EventHandler<E>
     {
-        let id = ctx.active();
-        let handler = |ctx: &mut UpdateCtx, event: &E| {
-            T::Widget::handle(ctx, StateHandle::new(ctx.active()), event);
-        };
-
-        self.add_subscriber(id, handler);
-    }
-
-    #[inline]
-    pub fn subscribe_id<T: Element>(&self, id: &TypedId<T>)
-        where T::Widget: EventHandler<E>
-    {
-        let handler = |ctx: &mut UpdateCtx, event: &E| {
-            T::Widget::handle(ctx, StateHandle::new(ctx.active()), event);
+        let handler = |id: RawWidgetId, ctx: &mut Context, event: &E| {
+            T::Widget::handle(ctx, StateHandle::new(id), event);
         };
 
         self.add_subscriber(id.raw(), handler);
@@ -93,8 +82,8 @@ impl<E> EventEmitter<E> {
     pub fn create_binding<T: Element>(&self) -> Binding<E>
         where T::Widget: EventHandler<E>
     {
-        let handler = |ctx: &mut UpdateCtx, event: &E| {
-            T::Widget::handle(ctx, StateHandle::new(ctx.active()), event);
+        let handler = |id: RawWidgetId, ctx: &mut Context, event: &E| {
+            T::Widget::handle(ctx, StateHandle::new(id), event);
         };
 
         Binding {
@@ -138,7 +127,7 @@ impl<E> Event<E> {
     #[must_use = "You should give this to ctx.event_queue.schedule()."]
     pub fn and_then(
         mut self,
-        callback: impl FnOnce(&mut UpdateCtx, E) + 'static
+        callback: impl FnOnce(&mut Context, E) + 'static
     ) -> Self {
         self.callback = Some(Box::new(callback));
 
@@ -163,7 +152,7 @@ impl<E> SubscriberEvent<E> {
     #[must_use = "You should give this to ctx.event_queue.schedule()."]
     pub fn and_then(
         mut self,
-        callback: impl FnOnce(&mut UpdateCtx, E) + 'static
+        callback: impl FnOnce(&mut Context, E) + 'static
     ) -> Self {
         self.callback = Some(Box::new(callback));
 
@@ -195,7 +184,7 @@ impl<E: 'static> EventSource for Event<E> {
 
             if len == 1 {
                 let sub = state.borrow().subscribers[0];
-                (sub.handler)(ctx, &event);
+                (sub.handler)(sub.id, ctx, &event);
 
                 if let Some(callback) = callback {
                     callback(ctx, event);
@@ -206,13 +195,13 @@ impl<E: 'static> EventSource for Event<E> {
 
                 while index < len - 1 {
                     let sub = state.borrow().subscribers[index];
-                    (sub.handler)(ctx, &event);
+                    (sub.handler)(sub.id, ctx, &event);
 
                     index += 1;
                 }
 
                 let sub = state.borrow().subscribers[index];
-                (sub.handler)(ctx, &event);
+                (sub.handler)(sub.id, ctx, &event);
 
                 if let Some(callback) = callback {
                     callback(ctx, event);
@@ -227,7 +216,7 @@ impl<E: 'static> EventSource for SubscriberEvent<E> {
         let Self { event, subscriber, callback } = self;
 
         queue.action(move |ctx| {
-            (subscriber.handler)(ctx, &event);
+            (subscriber.handler)(subscriber.id, ctx, &event);
 
             if let Some(callback) = callback {
                 callback(ctx, event);
@@ -238,8 +227,8 @@ impl<E: 'static> EventSource for SubscriberEvent<E> {
 
 impl<E> Binding<E> {
     #[inline]
-    pub fn bind(self, ctx: &mut InitCtx) {
-        let id = ctx.active();
+    pub fn bind(self, id: impl Into<Id>) {
+        let id = id.into().0;
         let handler = self.handler;
 
         self.target.state.borrow_mut()
@@ -250,7 +239,7 @@ impl<E> Binding<E> {
 
 impl<Event> Clone for EventEmitter<Event> {
     fn clone(&self) -> Self {
-        Self { state: self.state.clone() }
+        Self { state: Rc::clone(&self.state) }
     }
 }
 

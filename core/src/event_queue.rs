@@ -2,7 +2,7 @@ use std::{cell::RefCell, ptr};
 
 use bumpalo::Bump;
 
-use crate::{UpdateCtx, Id};
+use crate::{Context, Id};
 
 pub trait EventSource {
     fn emit(self, queue: &EventQueue);
@@ -18,8 +18,13 @@ pub(crate) enum EventType<'a> {
     Destroy(Id)
 }
 
-pub(crate) unsafe trait BumpAllocatedAction {
-    fn invoke(&self, ctx: &mut UpdateCtx);
+/// This trait wraps the FnOnce actions we allocate with bumpalo because it
+/// returns mutable references only and FnOnce requires ownership. The invoke()
+/// method on this trait creates a copy of the function on the stack and calls
+/// the closure. The method is unsafe because we need to ensure that the same
+/// closure won't be called again.
+pub(crate) trait BumpAllocatedAction {
+    unsafe fn invoke(&self, ctx: &mut Context);
 }
 
 impl<'a> EventQueue<'a> {
@@ -30,7 +35,7 @@ impl<'a> EventQueue<'a> {
 
     #[inline]
     pub fn action<F>(&self, f: F)
-        where F: FnOnce(&mut UpdateCtx) + 'a
+        where F: FnOnce(&mut Context) + 'a
     {
         let action = self.alloc.alloc(f);
         self.buffer.borrow_mut().push(EventType::Action(action));
@@ -53,9 +58,9 @@ impl<'a> Clone for EventQueue<'a> {
 
 impl<'a> Copy for EventQueue<'a> { }
 
-unsafe impl<F: FnOnce(&mut UpdateCtx)> BumpAllocatedAction for F {
+impl<F: FnOnce(&mut Context)> BumpAllocatedAction for F {
     #[inline]
-    fn invoke(&self, ctx: &mut UpdateCtx) {
+    unsafe fn invoke(&self, ctx: &mut Context) {
         unsafe { ptr::read(self)(ctx) }
     }
 }

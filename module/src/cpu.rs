@@ -3,7 +3,7 @@ use mibar_core::{
         text::{self, Text},
         SizeConstraints, Element, Widget
     },
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    DrawCtx, LayoutCtx, Context, Id, Task,
     ValueSender, TypedId, Size, Rect, StateHandle
 };
 
@@ -45,12 +45,12 @@ impl Element for Cpu {
     type Widget = CpuWidget;
     type Message = ();
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
         let mut rx = sys_info::CPU.subscribe(ctx.ui.runtime_handle());
-        let handle = ctx.task_with_sender(|sender: ValueSender<f64>| {
+        let task = Task::with_sender(id, |sender: ValueSender<f64>| {
             async move {
                 loop {
                     if let Ok(value) = rx.recv().await {
@@ -60,6 +60,8 @@ impl Element for Cpu {
             }
         });
 
+        let handle = ctx.ui.spawn(task);
+
         let text = format(0f64);
         let text = match self.style {
             Some(style) => Text::new(text).style(style),
@@ -67,7 +69,7 @@ impl Element for Cpu {
         };
         
         let state = State {
-            text: ctx.new_child(text),
+            text: ctx.new_child(id, text),
             handle
         };
 
@@ -84,7 +86,7 @@ impl Widget for CpuWidget {
 
     fn task_result(
         handle: StateHandle<Self::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         data: Box<dyn std::any::Any>
     ) {
         let usage = *data.downcast::<f64>().unwrap();

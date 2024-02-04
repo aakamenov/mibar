@@ -1,5 +1,5 @@
 use crate::{
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, StateHandle,
+    DrawCtx, LayoutCtx, Context, StateHandle, Id,
     Size, Rect, Font, Color, TextInfo, LineHeight
 };
 use super::{SizeConstraints, Element, Widget};
@@ -76,7 +76,7 @@ impl Element for Text {
     type Widget = TextWidget;
     type Message = Message;
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, _: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
@@ -96,7 +96,7 @@ impl Element for Text {
 
     fn message(
         handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         msg: Self::Message
     ) {
         let state = &mut ctx.tree[handle];

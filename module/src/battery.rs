@@ -1,8 +1,8 @@
 use mibar_core::{
     widget::{SizeConstraints, Element, Widget},
-    Size, Rect, InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    Size, Rect, DrawCtx, LayoutCtx, Context, Task,
     ValueSender, TextInfo, Color, Quad, Background,
-    Weight, Font, StateHandle
+    Weight, Font, StateHandle, Id
 };
 
 use tokio::{
@@ -64,11 +64,11 @@ impl Element for Battery {
     type Widget = BatteryWidget;
     type Message = ();
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let handle = ctx.task_with_sender(|sender: ValueSender<BatteryInfoState>| {
+        let task = Task::with_sender(id, |sender: ValueSender<BatteryInfoState>| {
             async move {
                 let mut interval = interval(self.interval);
 
@@ -103,6 +103,8 @@ impl Element for Battery {
                 }
             }
         });
+
+        let handle = ctx.ui.spawn(task);
 
         let mut font = ctx.ui.theme().font;
         font.weight = Weight::BOLD;
@@ -145,7 +147,7 @@ impl Widget for BatteryWidget {
 
     fn task_result(
         handle: StateHandle<Self::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         data: Box<dyn std::any::Any>
     ) {
         let info = *data.downcast::<BatteryInfoState>().unwrap();

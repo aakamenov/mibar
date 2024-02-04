@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
 use crate::{
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId, Event, Size,
+    DrawCtx, LayoutCtx, Context, TypedId, Event, Size,
     MouseEvent, MouseButton, Color, StateHandle, Quad, QuadStyle,
-    Rect, Action
+    Rect, Action, Id
 };
 use super::{
     container,
@@ -55,7 +55,7 @@ impl Button<Text> {
     #[inline]
     pub fn new(
         text: impl Into<String>,
-        on_click: impl Fn(&mut UpdateCtx) + 'static
+        on_click: impl Fn(&mut Context) + 'static
     ) -> Self {
         Self::with_child(Text::new(text), on_click)
     }
@@ -65,7 +65,7 @@ impl<E: Element> Button<E> {
     #[inline]
     pub fn with_child(
         child: E,
-        on_click: impl Fn(&mut UpdateCtx) + 'static
+        on_click: impl Fn(&mut Context) + 'static
     ) -> Self {
         Self {
             child,
@@ -110,14 +110,14 @@ impl<E: Element + 'static> Element for Button<E> {
     type Widget = ButtonWidget<E>;
     type Message = E::Message;
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
         (
             ButtonWidget { data: PhantomData },
             State {
-                child: ctx.new_child(self.child),
+                child: ctx.new_child(id, self.child),
                 on_click: self.on_click,
                 style: self.style,
                 is_hovered: false,
@@ -131,7 +131,7 @@ impl<E: Element + 'static> Element for Button<E> {
 
     fn message(
         handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         msg: Self::Message
     ) {
         let child = ctx.tree[handle].child;
@@ -162,9 +162,8 @@ impl<E: Element + 'static> Widget for ButtonWidget<E> {
         )
     }
 
-    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
-        let layout = ctx.layout();
-        let state = &mut ctx.tree[handle];
+    fn event(handle: StateHandle<Self::State>, ctx: &mut Context, event: &Event) {
+        let (state, layout) = ctx.tree.state_and_layout_mut(handle);
 
         match event {
             Event::Mouse(event) => match event {

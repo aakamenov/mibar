@@ -7,7 +7,7 @@ pub mod state;
 mod layout;
 
 pub use layout::*; 
-pub use flex::{Flex, FlexBuilder};
+pub use flex::{Flex, StaticFlexBuilder};
 pub use text::Text;
 pub use button::{Button, ButtonState};
 pub use image::Image;
@@ -17,7 +17,7 @@ pub use state::{AppState, State};
 use std::any::{Any, type_name};
 
 use crate::{
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    DrawCtx, LayoutCtx, Context, Id,
     Event, StateHandle, Size, Rect
 };
 
@@ -25,14 +25,14 @@ pub trait Element {
     type Widget: Widget + 'static;
     type Message;
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     );
 
     fn message(
         _handle: StateHandle<<Self::Widget as Widget>::State>,
-        _ctx: &mut UpdateCtx,
+        _ctx: &mut Context,
         _msg: Self::Message
     ) { }
 }
@@ -42,8 +42,8 @@ pub trait Widget {
 
     fn layout(handle: StateHandle<Self::State>, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size;
     fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, layout: Rect);
-    fn event(_handle: StateHandle<Self::State>, _ctx: &mut UpdateCtx, _event: &Event) { }
-    fn task_result(_handle: StateHandle<Self::State>, _ctx: &mut UpdateCtx, _data: Box<dyn Any>) {
+    fn event(_handle: StateHandle<Self::State>, _ctx: &mut Context, _event: &Event) { }
+    fn task_result(_handle: StateHandle<Self::State>, _ctx: &mut Context, _data: Box<dyn Any>) {
         panic!(
             "{} is executing async tasks but hasn't implemented Widget::task_result",
             type_name::<Self>()
@@ -53,10 +53,10 @@ pub trait Widget {
 }
 
 pub trait AnyWidget {
-    fn layout(&self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size;
-    fn draw(&self, ctx: &mut DrawCtx, layout: Rect);
-    fn event(&self, _ctx: &mut UpdateCtx, _event: &Event);
-    fn task_result(&self, _ctx: &mut UpdateCtx, _data: Box<dyn Any>);
+    fn layout(&self, id: Id, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size;
+    fn draw(&self, id: Id, ctx: &mut DrawCtx, layout: Rect);
+    fn event(&self, id: Id, _ctx: &mut Context, _event: &Event);
+    fn task_result(&self, id: Id, _ctx: &mut Context, _data: Box<dyn Any>);
     fn destroy(&self, state: Box<dyn Any + 'static>);
 }
 
@@ -72,23 +72,23 @@ pub trait AnyWidget {
 
 impl<T: Widget> AnyWidget for T {
     #[inline]
-    fn layout(&self, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
-        <T as Widget>::layout(StateHandle::new(ctx.active()), ctx, bounds)
+    fn layout(&self, id: Id, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
+        <T as Widget>::layout(StateHandle::new(id.0), ctx, bounds)
     }
 
     #[inline]
-    fn draw(&self, ctx: &mut DrawCtx, layout: Rect) {
-        <T as Widget>::draw(StateHandle::new(ctx.active()), ctx, layout)
+    fn draw(&self, id: Id, ctx: &mut DrawCtx, layout: Rect) {
+        <T as Widget>::draw(StateHandle::new(id.0), ctx, layout)
     }
 
     #[inline]
-    fn event(&self, ctx: &mut UpdateCtx, event: &Event) {
-        <T as Widget>::event(StateHandle::new(ctx.active()), ctx, event)
+    fn event(&self, id: Id, ctx: &mut Context, event: &Event) {
+        <T as Widget>::event(StateHandle::new(id.0), ctx, event)
     }
 
     #[inline]
-    fn task_result(&self, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
-        <T as Widget>::task_result(StateHandle::new(ctx.active()), ctx, data)
+    fn task_result(&self, id: Id, ctx: &mut Context, data: Box<dyn Any>) {
+        <T as Widget>::task_result(StateHandle::new(id.0), ctx, data)
     }
 
     #[inline]

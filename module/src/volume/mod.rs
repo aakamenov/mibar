@@ -13,7 +13,7 @@ use mibar_core::{
         Element, Widget, SizeConstraints
     },
     Size, Rect, MouseEvent, MouseButton,
-    InitCtx, UpdateCtx, DrawCtx, LayoutCtx,
+    Context, DrawCtx, LayoutCtx, Id, Task,
     Event, TypedId, ValueSender, StateHandle
 };
 
@@ -53,11 +53,11 @@ impl Element for PulseAudioVolume {
     type Widget = PulseAudioVolumeWidget;
     type Message = ();
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let handle = ctx.task_with_sender(|sender: ValueSender<pulseaudio::State>| {
+        let task = Task::with_sender(id, |sender: ValueSender<pulseaudio::State>| {
             async move {
                 pulseaudio::init();
                 let mut rx = pulseaudio::subscribe();
@@ -86,6 +86,7 @@ impl Element for PulseAudioVolume {
                 }
             }
         });
+        let handle = ctx.ui.spawn(task);
 
         let text = (self.format)(pulseaudio::State::default());
         let text = match self.style {
@@ -95,7 +96,7 @@ impl Element for PulseAudioVolume {
 
         let state = State {
             format: self.format,
-            text: ctx.new_child(text),
+            text: ctx.new_child(id, text),
             handle
         };
 
@@ -115,12 +116,14 @@ impl Widget for PulseAudioVolumeWidget {
     }
 
     fn event(
-        _handle: StateHandle<Self::State>,
-        ctx: &mut UpdateCtx,
+        handle: StateHandle<Self::State>,
+        ctx: &mut Context,
         event: &Event
     ) {
+        let layout = ctx.tree.layout(handle);
+
         if matches!(event, Event::Mouse(MouseEvent::MousePress { pos, button })
-            if *button == MouseButton::Left && ctx.layout().contains(*pos)
+            if *button == MouseButton::Left && layout.contains(*pos)
         ) {
             pulseaudio::dispatch(pulseaudio::Request::ToggleMute);
         }
@@ -128,7 +131,7 @@ impl Widget for PulseAudioVolumeWidget {
 
     fn task_result(
         handle: StateHandle<Self::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         data: Box<dyn Any>
     ) {
         let pa_state = *data.downcast::<pulseaudio::State>().unwrap();

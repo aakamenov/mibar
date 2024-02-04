@@ -6,8 +6,8 @@ use std::{any::Any, mem::MaybeUninit};
 
 use mibar_core::{
     widget::{SizeConstraints, Element, Widget},
-    MouseEvent, Size, Rect, InitCtx, DrawCtx, LayoutCtx,
-    UpdateCtx, Event, ValueSender, TypedId, StateHandle
+    MouseEvent, Size, Rect, DrawCtx, LayoutCtx, Id, Task,
+    Context, Event, ValueSender, TypedId, StateHandle
 };
 
 use crate::hyprland::{self, WorkspacesChanged, SubscriptionToken};
@@ -36,14 +36,14 @@ impl Element for Workspaces {
     type Widget = WorkspacesWidget;
     type Message = ();
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
         let token = hyprland::subscribe_workspaces(
             ctx.ui.runtime_handle(),
             ctx.ui.window_id(),
-            ctx.value_sender()
+            ctx.ui.value_sender(id)
         );
 
         let mut buttons: MaybeUninit<[TypedId<button::Button>; WORKSPACE_COUNT]> =
@@ -51,6 +51,7 @@ impl Element for Workspaces {
 
         for i in 0..WORKSPACE_COUNT {
             let button = ctx.new_child(
+                id,
                 button::Button::new((i + 1) as u8, self.style)
             );
             unsafe {
@@ -67,28 +68,30 @@ impl Element for Workspaces {
 impl Widget for WorkspacesWidget {
     type State = State;
 
-    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
+    fn event(handle: StateHandle<Self::State>, ctx: &mut Context, event: &Event) {
+        let (state, layout) = ctx.tree.state_and_layout(handle);
+
         if let Event::Mouse(MouseEvent::Scroll(delta)) = event {
-            if ctx.is_hovered() {
+            if ctx.ui.is_hovered(layout) {
                 let y = delta.values().y;
                 if y > 0f32 {
-                    let _ = ctx.task_void(hyprland::move_workspace_next());
+                    let _ = ctx.ui.spawn(Task::void(hyprland::move_workspace_next()));
                 } else if y < 0f32 {
-                    let _ = ctx.task_void(hyprland::move_workspace_prev());
+                    let _ = ctx.ui.spawn(Task::void(hyprland::move_workspace_prev()));
                 }
 
                 return;
             }
         }
 
-        for button in ctx.tree[handle].buttons.clone() {
+        for button in state.buttons.clone() {
             ctx.event(button, event);
         }
     }
 
     fn task_result(
         handle: StateHandle<Self::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         data: Box<dyn Any>
     ) {
         let event = data.downcast::<WorkspacesChanged>().unwrap();

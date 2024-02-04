@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, ops::{Deref, DerefMut}};
 
 use crate::{
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx,
+    DrawCtx, LayoutCtx, Context,
     Id, Event, Size, Rect, StateHandle
 };
 
@@ -10,7 +10,7 @@ use super::{Element, Widget, SizeConstraints};
 pub struct AppState<
     T,
     E: Element,
-    S: FnOnce(&mut InitCtx) -> T,
+    S: FnOnce(&mut Context) -> T,
     F: FnOnce(&mut T, StateHandle<State<T>>) -> E
 > {
     create_state: S,
@@ -35,7 +35,7 @@ pub struct State<T> {
 impl<
     T,
     E: Element,
-    S: FnOnce(&mut InitCtx) -> T,
+    S: FnOnce(&mut Context) -> T,
     F: FnOnce(&mut T, StateHandle<State<T>>) -> E
 > AppState<T, E, S, F> {
     #[inline]
@@ -54,20 +54,20 @@ impl<
 impl<
     T: 'static,
     E: Element + 'static,
-    S: FnOnce(&mut InitCtx) -> T,
+    S: FnOnce(&mut Context) -> T,
     F: FnOnce(&mut T, StateHandle<State<T>>) -> E
 > Element for AppState<T, E, S, F> {
     type Widget = StateWidget<T>;
     type Message = Message<T>;
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
         let mut state = (self.create_state)(ctx);
-        let handle = StateHandle::new(ctx.active());
+        let handle = StateHandle::new(id.0);
 
-        let child = ctx.new_child((self.create_child)(&mut state, handle)).into();
+        let child = ctx.new_child(id, (self.create_child)(&mut state, handle)).into();
 
         (
             StateWidget { data: PhantomData },
@@ -77,7 +77,7 @@ impl<
 
     fn message(
         handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         msg: Self::Message
     ) {
         let state = &mut ctx.tree[handle];
@@ -99,7 +99,7 @@ impl<T: 'static> Widget for StateWidget<T> {
         ctx.layout(ctx.tree[handle].child, bounds)
     }
 
-    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
+    fn event(handle: StateHandle<Self::State>, ctx: &mut Context, event: &Event) {
         ctx.event(ctx.tree[handle].child, event)
     }
 

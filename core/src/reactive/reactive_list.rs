@@ -5,7 +5,7 @@ use std::{
     fmt
 };
 
-use crate::{widget::Element, InitCtx, TypedId};
+use crate::{widget::Element, TypedId, Id, EventQueue};
 use super::event_emitter::{self, EventEmitter, EventHandler, Event};
 
 pub struct ReactiveList<T> {
@@ -47,23 +47,13 @@ impl<T> ReactiveList<T> {
     }
 
     #[inline]
-    pub fn subscribe<E: Element>(&self, ctx: &mut InitCtx, element: &E)
+    pub fn subscribe<E: Element>(&self, id: &TypedId<E>, queue: &EventQueue)
         where
             E::Widget: EventHandler<ListOp<T>>,
             T: 'static
     {
-        self.emitter.subscribe(ctx, element);
-        self.init_subscriber(ctx);
-    }
-
-    #[inline]
-    pub fn subscribe_id<E: Element>(&self, ctx: &mut InitCtx, id: &TypedId<E>)
-        where
-            E::Widget: EventHandler<ListOp<T>>,
-            T: 'static
-    {
-        self.emitter.subscribe_id(id);
-        self.init_subscriber(ctx);
+        self.emitter.subscribe(id);
+        self.init_subscriber(queue);
     }
 
     #[inline]
@@ -82,6 +72,7 @@ impl<T> ReactiveList<T> {
     }
 
     #[inline]
+    #[must_use = "You should give this to ctx.event_queue.schedule()."]
     pub fn push(&self, item: T) -> Event<ListOp<T>>
         where T: 'static
     {
@@ -97,23 +88,21 @@ impl<T> ReactiveList<T> {
     }
 
     #[inline]
-    fn init_subscriber(&self, ctx: &mut InitCtx)
+    fn init_subscriber(&self, queue: &EventQueue)
         where T: 'static
     {
-        if !self.items.borrow().is_empty() {
-            let subscriber = self.emitter.last_added().unwrap();
-            let op = ListOp::Init(ListRef(self.items.clone()));
+        let subscriber = self.emitter.last_added().unwrap();
+        let op = ListOp::Init(ListRef(self.items.clone()));
 
-            ctx.event_queue.schedule(subscriber.emit(op));
-        }
+        queue.schedule(subscriber.emit(op));
     }
 }
 
 impl<T: 'static> Binding<T> {
     #[inline]
-    pub fn bind(self, ctx: &mut InitCtx) {
-        self.inner.bind(ctx);
-        self.target.init_subscriber(ctx);
+    pub fn bind(self, id: impl Into<Id>, queue: &EventQueue) {
+        self.inner.bind(id);
+        self.target.init_subscriber(queue);
     }
 }
 
@@ -153,7 +142,7 @@ impl<T> Clone for ReactiveList<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
-            items: self.items.clone(),
+            items: Rc::clone(&self.items),
             emitter: self.emitter.clone()
         }
     }

@@ -60,6 +60,11 @@ impl WidgetTree {
     }
 
     #[inline]
+    pub fn layout(&self, id: impl Into<Id>) -> Rect {
+        self.widgets[id.into().0].layout
+    }
+
+    #[inline]
     pub fn state<S: 'static>(&self, handle: StateHandle<S>) -> Option<&S> {
         self.widgets.get(handle.id)
             .map(|x| x.state.downcast_ref().unwrap())
@@ -69,6 +74,26 @@ impl WidgetTree {
     pub fn state_mut<S: 'static>(&mut self, handle: StateHandle<S>) -> Option<&mut S> {
         self.widgets.get_mut(handle.id)
             .map(|x| x.state.downcast_mut().unwrap())
+    }
+
+    #[inline]
+    pub fn state_and_layout<S: 'static>(
+        &self,
+        handle: StateHandle<S>,
+    ) -> (&S, Rect) {
+        let state = &self.widgets[handle.id];
+
+        (state.state.downcast_ref().unwrap(), state.layout)
+    }
+
+    #[inline]
+    pub fn state_and_layout_mut<S: 'static>(
+        &mut self,
+        handle: StateHandle<S>,
+    ) -> (&mut S, Rect) {
+        let state = &mut self.widgets[handle.id];
+
+        (state.state.downcast_mut().unwrap(), state.layout)
     }
 
     #[inline]
@@ -139,7 +164,10 @@ impl WidgetTree {
     }
 
     pub(crate) fn dealloc(&mut self, id: RawWidgetId) {
-        let widget = self.widgets.remove(id).unwrap();
+        let Some(widget) = self.widgets.remove(id) else {
+            // Widget was deallocated by parent.
+            return;
+        };
 
         let parent = self.child_to_parent.remove(id).unwrap();
         if parent != RawWidgetId::null() {
@@ -237,6 +265,11 @@ impl<T> StateHandle<T> {
             data: PhantomData
         }
     }
+
+    #[inline]
+    pub fn id(self) -> Id {
+        Id(self.id)
+    }
 }
 
 impl<T> ContextHandle<T> {
@@ -246,6 +279,13 @@ impl<T> ContextHandle<T> {
             id,
             data: PhantomData
         }
+    }
+}
+
+impl<T> Into<Id> for StateHandle<T> {
+    #[inline]
+    fn into(self) -> Id {
+        Id(self.id)
     }
 }
 

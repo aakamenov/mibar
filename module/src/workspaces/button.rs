@@ -1,7 +1,7 @@
 use mibar_core::{
     widget::{SizeConstraints, Element, Widget},
     MouseEvent, MouseButton, Size, Rect, Circle, Color, Event,
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TextInfo, StateHandle
+    DrawCtx, LayoutCtx, Context, TextInfo, StateHandle, Id, Task
 };
 
 use super::hyprland;
@@ -60,7 +60,7 @@ impl Element for Button {
     type Widget = ButtonWidget;
     type Message = WorkspaceStatus;
 
-    fn make_widget(self, _ctx: &mut InitCtx) -> (
+    fn make_widget(self, _id: Id, _ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
@@ -79,7 +79,7 @@ impl Element for Button {
 
     fn message(
         handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         msg: Self::Message
     ) {
         let state = &mut ctx.tree[handle];
@@ -117,9 +117,8 @@ impl Widget for ButtonWidget {
         bounds.constrain(size)
     }
 
-    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
-        let layout = ctx.layout();
-        let state = &mut ctx.tree[handle];
+    fn event(handle: StateHandle<Self::State>, ctx: &mut Context, event: &Event) {
+        let (state, layout) = ctx.tree.state_and_layout_mut(handle);
 
         match event {
             Event::Mouse(event) => match event {
@@ -155,7 +154,7 @@ impl Widget for ButtonWidget {
                         !state.status.is_current
                     {
                         let id = state.id;
-                        let _ = ctx.task_void(hyprland::change_workspace(id));
+                        let _ = ctx.ui.spawn(Task::void(hyprland::change_workspace(id)));
                     }
 
                     let state = &mut ctx.tree[handle];

@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::{
-    InitCtx, DrawCtx, LayoutCtx, UpdateCtx, TypedId, Event,
+    DrawCtx, LayoutCtx, Context, TypedId, Event,
     StateHandle, Size, Rect, Quad, QuadStyle, Color, Id
 };
 
@@ -104,14 +104,14 @@ impl<E: Element + 'static> Element for Container<E> {
     type Widget = ContainerWidget<E>;
     type Message = E::Message;
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
         (
             ContainerWidget { data: PhantomData },
             State {
-                child: ctx.new_child(self.child),
+                child: ctx.new_child(id, self.child),
                 style: self.style,
                 padding: self.padding,
                 width: self.width,
@@ -124,7 +124,7 @@ impl<E: Element + 'static> Element for Container<E> {
 
     fn message(
         handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut UpdateCtx,
+        ctx: &mut Context,
         msg: Self::Message
     ) {
         let child = ctx.tree[handle].child;
@@ -155,7 +155,7 @@ impl<E: Element + 'static> Widget for ContainerWidget<E> {
         )
     }
 
-    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
+    fn event(handle: StateHandle<Self::State>, ctx: &mut Context, event: &Event) {
         ctx.event(ctx.tree[handle].child, event);
     }
 

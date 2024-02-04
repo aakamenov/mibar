@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use crate::{UpdateCtx, EventQueue, EventSource};
+use crate::{Context, EventQueue, EventSource};
 
 #[derive(Clone)]
-pub struct Action(Rc<dyn Fn(&mut UpdateCtx)>);
+pub struct Action(Rc<dyn Fn(&mut Context)>);
 
 impl EventSource for Action {
     #[inline]
@@ -22,12 +22,12 @@ impl EventSource for &Action {
 
 impl Action {
     #[inline]
-    pub fn new(action: impl Fn(&mut UpdateCtx) + 'static) -> Self {
+    pub fn new(action: impl Fn(&mut Context) + 'static) -> Self {
         Self(Rc::new(action))
     }
 }
 
-impl<F: Fn(&mut UpdateCtx) + 'static> From<F> for Action {
+impl<F: Fn(&mut Context) + 'static> From<F> for Action {
     #[inline]
     fn from(action: F) -> Self {
         Self(Rc::new(action))

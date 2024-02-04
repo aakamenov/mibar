@@ -6,8 +6,8 @@ use mibar_core::{
         text::{self, Text},
         Element, Widget, SizeConstraints
     },
-    Size, Rect, InitCtx, DrawCtx, LayoutCtx,
-    UpdateCtx, TypedId, StateHandle
+    Size, Rect, DrawCtx, LayoutCtx, Id,
+    Context, TypedId, StateHandle, Task
 };
 
 use crate::sys_info::Date;
@@ -61,7 +61,7 @@ impl Element for DateTime {
     type Widget = DateTimeWidget;
     type Message = ();
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
@@ -74,13 +74,13 @@ impl Element for DateTime {
         };
         
         let state = State {
-            text: ctx.new_child(text)
+            text: ctx.new_child(id, text)
         };
 
-        let _ = ctx.task(async move {
+        let _ = ctx.ui.spawn(Task::new(id, async move {
             sleep(Duration::from_secs(remaining as u64)).await;
             get_time()
-        });
+        }));
 
         (DateTimeWidget, state)
     }
@@ -93,14 +93,14 @@ impl Widget for DateTimeWidget {
         ctx.layout(ctx.tree[handle].text, bounds)
     }
 
-    fn task_result(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
+    fn task_result(handle: StateHandle<Self::State>, ctx: &mut Context, data: Box<dyn Any>) {
         let result = data.downcast::<(String, i32)>().unwrap();
 
         let remaining = result.1;
-        let _ = ctx.task(async move {
+        let _ = ctx.ui.spawn(Task::new(handle, async move {
             sleep(Duration::from_secs(remaining as u64)).await;
             get_time()
-        });
+        }));
 
         ctx.message(ctx.tree[handle].text, text::Message::SetText(result.0));
     }

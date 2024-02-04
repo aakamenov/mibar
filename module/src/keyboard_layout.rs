@@ -5,8 +5,8 @@ use mibar_core::{
         button::{self, Button}, text::{self, Text},
         SizeConstraints, Element, Widget
     },
-    Size, Rect, InitCtx, DrawCtx, LayoutCtx,
-    UpdateCtx, Event, TypedId, StateHandle
+    Size, Rect, DrawCtx, LayoutCtx, Id, Task,
+    Context, Event, TypedId, StateHandle
 };
 
 use crate::hyprland::{
@@ -34,7 +34,7 @@ impl KeyboardLayout {
         Self {
             device,
             button: Button::new("n/a", move |ctx| {
-                let _ = ctx.task_void(hyprland::keyboard_layout_next(device));
+                let _ = ctx.ui.spawn(Task::void(hyprland::keyboard_layout_next(device)));
             })
         }
     }
@@ -51,30 +51,30 @@ impl Element for KeyboardLayout {
     type Widget = KeyboardLayoutWidget;
     type Message = ();
 
-    fn make_widget(self, ctx: &mut InitCtx) -> (
+    fn make_widget(self, id: Id, ctx: &mut Context) -> (
         Self::Widget,
         <Self::Widget as Widget>::State
     ) {
-        let _ = ctx.task(async move {
+        let _ = ctx.ui.spawn(Task::new(id, async move {
             let layout = hyprland::current_layout(self.device).await;
 
             KeyboardLayoutChanged {
                 layout,
                 device: self.device
             }
-        });
+        }));
 
         let token = hyprland::subscribe_keyboard_layout(
             ctx.ui.runtime_handle(),
             ctx.ui.window_id(),
-            ctx.value_sender(),
+            ctx.ui.value_sender(id),
             self.device
         );
 
         (
             KeyboardLayoutWidget,
             State {
-                button: ctx.new_child(self.button),
+                button: ctx.new_child(id, self.button),
                 _token: token
             }
         )
@@ -92,11 +92,11 @@ impl Widget for KeyboardLayoutWidget {
         ctx.layout(ctx.tree[handle].button, bounds)
     }
 
-    fn event(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, event: &Event) {
+    fn event(handle: StateHandle<Self::State>, ctx: &mut Context, event: &Event) {
         ctx.event(ctx.tree[handle].button, event);
     }
 
-    fn task_result(handle: StateHandle<Self::State>, ctx: &mut UpdateCtx, data: Box<dyn Any>) {
+    fn task_result(handle: StateHandle<Self::State>, ctx: &mut Context, data: Box<dyn Any>) {
         let event = data.downcast::<KeyboardLayoutChanged>().unwrap();
         let button = ctx.tree[handle].button;
 
