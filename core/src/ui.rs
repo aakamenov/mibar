@@ -11,16 +11,12 @@ use std::{
 use tiny_skia::PixmapMut;
 use tokio::{runtime, task::JoinHandle, sync::mpsc::UnboundedSender};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
-use slotmap::Key;
 use bumpalo::Bump;
 use smallvec::SmallVec;
 
 use crate::{
     geometry::{Rect, Size, Point},
-    widget_tree::{
-        WidgetTree, WidgetState, RawWidgetId,
-        StateHandle, ContextHandle
-    },
+    widget_tree::{WidgetTree, RawWidgetId, StateHandle, ContextHandle},
     event_queue::{EventQueue, EventType},
     widget::{Element, Widget, AnyWidget, SizeConstraints},
     theme::Theme,
@@ -47,14 +43,9 @@ pub struct ValueSender<T: Send> {
     phantom: PhantomData<T>
 }
 
-pub struct TypedId<E: Element> {
-    id: Id,
-    message: fn(
-        StateHandle<<E::Widget as Widget>::State>,
-        &mut Context,
-        E::Message
-    ),
-    data: PhantomData<E>
+pub struct TypedId<T: Element> {
+    id: RawWidgetId,
+    data: PhantomData<T>
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
@@ -117,13 +108,13 @@ pub(crate) struct Ui {
 }
 
 impl Ui {
-    pub fn new<E: Element>(
+    pub fn new(
         window_id: WindowId,
         rt_handle: runtime::Handle,
         task_send: Sender<TaskResult>,
         client_send: UnboundedSender<UiRequest>,
         theme: Theme,
-        root: E
+        build_ui: fn(&mut Context) -> Id
     ) -> Self {
         let mut renderer = Renderer::new();
         let mut tree = WidgetTree::new();
@@ -152,7 +143,7 @@ impl Ui {
             }
         };
 
-        let root = init_ctx.new_child(Id(RawWidgetId::null()), root);
+        let root = build_ui(&mut init_ctx);
         init_ctx.execute_events();
         alloc.reset();
 
@@ -433,42 +424,19 @@ impl<'a> Context<'a> {
         widget.event(id, self, event);
     }
 
-    #[inline]
-    pub fn message<E: Element>(&mut self, id: TypedId<E>, msg: E::Message) {
-        (id.message)(StateHandle::new(id.raw()), self, msg);
-    }
-
     pub fn new_child<E: Element>(&mut self, parent: impl Into<Id>, el: E) -> TypedId<E>
         where E::Widget: AnyWidget
     {
         let parent = parent.into().0;
         self.ui.request_layout();
 
-        // Hack, so we can get a key from the SlotMap
-        let child = self.tree.widgets.insert(
-            WidgetState::new(Rc::new(null_widget::NullWidget), Box::new(null_widget::State))
-        );
+        let child = el.make(self);
+        self.tree.child_to_parent.insert(child.raw(), parent);
 
-        let (widget, state) = el.make_widget(Id(child), self);
+        let entry = self.tree.parent_to_children.entry(parent).unwrap();
+        entry.or_default().push(child.raw());
 
-        let state = WidgetState::new(Rc::new(widget), Box::new(state));
-        self.tree.widgets[child] = state;
-
-        self.tree.child_to_parent.insert(child, parent);
-
-        match self.tree.parent_to_children.entry(parent) {
-            Some(entry) => entry.or_default().push(child),
-            None => {
-                // We've reached the root widget which has no parent.
-                assert_eq!(parent, RawWidgetId::null());
-            }
-        }
-
-        TypedId {
-            id: Id(child),
-            message: E::message,
-            data: PhantomData
-        }
+        child
     }
 
     /// Destroys the given widget and all its children **immediately**.
@@ -492,14 +460,14 @@ impl<'a> Context<'a> {
         *boxed
     }
 
-    pub fn open_window<E: Element>(
+    pub fn open_window(
         &self,
         window: impl Into<Window>,
-        root: impl FnOnce() -> E + Send + 'static
+        build_ui: fn(&mut Context) -> Id
     ) -> WindowId {
         let id = WindowId::new();
         let make_ui = Box::new(move |theme, rt_handle, task_send, client_send| {
-            Ui::new(id, rt_handle, task_send, client_send, theme, root())
+            Ui::new(id, rt_handle, task_send, client_send, theme, build_ui)
         });
 
         let config = match window.into() {
@@ -622,34 +590,44 @@ impl<T: Send> Hash for ValueSender<T> {
     }
 }
 
-impl<E: Element> TypedId<E> {
+impl<T: Element> TypedId<T> {
+    pub(crate) fn new(id: RawWidgetId) -> Self {
+        Self { id, data: PhantomData }
+    }
+
     #[inline]
     pub(crate) fn raw(&self) -> RawWidgetId {
-        self.id.0
+        self.id
     }
 }
 
-impl<E: Element> Into<Id> for TypedId<E> {
+impl<T: Element> Into<Id> for TypedId<T> {
     #[inline]
     fn into(self) -> Id {
         Id(self.raw())
     }
 }
 
-impl<E: Element> Clone for TypedId<E> {
+impl<T: Element> Into<StateHandle<<T::Widget as Widget>::State>> for TypedId<T> {
+    #[inline]
+    fn into(self) -> StateHandle<<T::Widget as Widget>::State> {
+        StateHandle::new(self.id)
+    }
+}
+
+impl<T: Element> Clone for TypedId<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
             id: self.id,
-            message: self.message,
             data: PhantomData,
         }
     }
 }
 
-impl<E: Element> Copy for TypedId<E> { }
+impl<T: Element> Copy for TypedId<T> { }
 
-impl<E: Element> fmt::Debug for TypedId<E> {
+impl<T: Element> fmt::Debug for TypedId<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.id, f)
@@ -662,42 +640,5 @@ impl fmt::Debug for TaskResult {
             .field("id", &self.id)
             .field("data", &self.data)
             .finish()
-    }
-}
-
-// This is a hack which exists because you cannot reserve a key on a SlotMap but we
-// need to know the key before the new widget has been constructed. So we put this Null
-// widget in temporarily and then replace it with the actual widget once it has been
-// constructed. We use ZSTs so no allocations occur. We cannot use SlotMap::insert_with_key
-// because we are are passing the InitCtx down the tree.
-mod null_widget {
-    use super::*;
-
-    pub struct Null;
-    pub struct NullWidget;
-    pub struct State;
-
-    impl Element for Null {
-        type Widget = NullWidget;
-        type Message = ();
-
-        fn make_widget(self, _id: Id, _ctx: &mut Context) -> (
-            Self::Widget,
-            <Self::Widget as Widget>::State
-        ) {
-            panic!("Called into null widget. This is a bug...");
-        }
-    }
-
-    impl Widget for NullWidget {
-        type State = State;
-
-        fn layout(_handle: StateHandle<Self::State>, _ctx: &mut LayoutCtx, _bounds: SizeConstraints) -> Size {
-            panic!("Called into null widget. This is a bug...");
-        }
-
-        fn draw(_handle: StateHandle<Self::State>, _ctx: &mut DrawCtx, _layout: Rect) {
-            panic!("Called into null widget. This is a bug...");
-        }
     }
 }

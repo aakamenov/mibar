@@ -6,10 +6,10 @@ use std::{
     ops::{Index, IndexMut}
 };
 
-use slotmap::{SlotMap, SecondaryMap, Key, new_key_type};
+use slotmap::{SlotMap, SecondaryMap, new_key_type};
 use smallvec::SmallVec;
 
-use crate::{widget::AnyWidget, Rect, Id};
+use crate::{widget::{AnyWidget, Widget, Element}, Rect, Id, TypedId};
 
 pub trait ProvidesContext<C> {
     fn context_handle(&self) -> ContextHandle<C>;
@@ -65,23 +65,28 @@ impl WidgetTree {
     }
 
     #[inline]
-    pub fn state<S: 'static>(&self, handle: StateHandle<S>) -> Option<&S> {
-        self.widgets.get(handle.id)
+    pub fn state<S: 'static>(&self, handle: impl Into<StateHandle<S>>) -> Option<&S> {
+        let id = handle.into().id;
+
+        self.widgets.get(id)
             .map(|x| x.state.downcast_ref().unwrap())
     }
 
     #[inline]
-    pub fn state_mut<S: 'static>(&mut self, handle: StateHandle<S>) -> Option<&mut S> {
-        self.widgets.get_mut(handle.id)
+    pub fn state_mut<S: 'static>(&mut self, handle: impl Into<StateHandle<S>>) -> Option<&mut S> {
+        let id = handle.into().id;
+
+        self.widgets.get_mut(id)
             .map(|x| x.state.downcast_mut().unwrap())
     }
 
     #[inline]
     pub fn state_and_layout<S: 'static>(
         &self,
-        handle: StateHandle<S>,
+        handle: impl Into<StateHandle<S>>,
     ) -> (&S, Rect) {
-        let state = &self.widgets[handle.id];
+        let id = handle.into().id;
+        let state = &self.widgets[id];
 
         (state.state.downcast_ref().unwrap(), state.layout)
     }
@@ -89,9 +94,10 @@ impl WidgetTree {
     #[inline]
     pub fn state_and_layout_mut<S: 'static>(
         &mut self,
-        handle: StateHandle<S>,
+        handle: impl Into<StateHandle<S>>,
     ) -> (&mut S, Rect) {
-        let state = &mut self.widgets[handle.id];
+        let id = handle.into().id;
+        let state = &mut self.widgets[id];
 
         (state.state.downcast_mut().unwrap(), state.layout)
     }
@@ -99,11 +105,13 @@ impl WidgetTree {
     #[inline]
     pub fn state_and_context<S: 'static, C: 'static>(
         &mut self,
-        state: StateHandle<S>,
+        handle: impl Into<StateHandle<S>>,
         context: ContextHandle<C>
     ) -> (&mut S, &mut C) {
+        let handle = handle.into();
+
         (
-            self.widgets[state.id].state.downcast_mut().unwrap(),
+            self.widgets[handle.id].state.downcast_mut().unwrap(),
             self.contexts[context.id].downcast_mut().unwrap(),
         )
     }
@@ -111,10 +119,12 @@ impl WidgetTree {
     #[inline]
     pub fn state_with_context<S: 'static, C: 'static>(
         &mut self,
-        state: StateHandle<S>,
+        state: impl Into<StateHandle<S>>,
         get: impl FnOnce(&S) -> ContextHandle<C>
     ) -> (&mut S, &mut C) {
-        let state = self.widgets[state.id].state.downcast_mut().unwrap();
+        let id = state.into().id;
+
+        let state = self.widgets[id].state.downcast_mut().unwrap();
         let context = self.contexts[get(&state).id].downcast_mut().unwrap();
 
         (state, context)
@@ -169,13 +179,13 @@ impl WidgetTree {
             return;
         };
 
-        let parent = self.child_to_parent.remove(id).unwrap();
-        if parent != RawWidgetId::null() {
+        // If None, the parameter is the root widget.
+        if let Some(parent) = self.child_to_parent.remove(id) {
             let children = &mut self.parent_to_children[parent];
             let index = children.iter().position(|x| *x == id).unwrap();
 
             // Can't use swap_remove() because order is important when doing layout.
-            children.remove(index);
+            children.remove(index);      
         }
 
         let children = self.parent_to_children
@@ -215,6 +225,20 @@ impl WidgetTree {
         for id in self.dependencies.remove(id).unwrap_or_default() {
             self.contexts.remove(id);
         }
+    }
+}
+
+impl<T: Element> Index<TypedId<T>> for WidgetTree {
+    type Output = <T::Widget as Widget>::State;
+
+    fn index(&self, id: TypedId<T>) -> &Self::Output {
+        self.widgets[id.raw()].state.downcast_ref().unwrap()
+    }
+}
+
+impl<T: Element> IndexMut<TypedId<T>> for WidgetTree {
+    fn index_mut(&mut self, id: TypedId<T>) -> &mut Self::Output {
+        self.widgets[id.raw()].state.downcast_mut().unwrap()
     }
 }
 

@@ -2,7 +2,7 @@ use std::any::Any;
 
 use mibar_core::{
     widget::{
-        button::{self, Button}, text::{self, Text},
+        button::{self, Button}, text::Text,
         SizeConstraints, Element, Widget
     },
     Size, Rect, DrawCtx, LayoutCtx, Id, Task,
@@ -21,6 +21,7 @@ pub struct KeyboardLayout {
     button: Button<Text>
 }
 
+#[derive(Default)]
 pub struct KeyboardLayoutWidget;
 
 pub struct State {
@@ -49,12 +50,8 @@ impl KeyboardLayout {
 
 impl Element for KeyboardLayout {
     type Widget = KeyboardLayoutWidget;
-    type Message = ();
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let _ = ctx.ui.spawn(Task::new(id, async move {
             let layout = hyprland::current_layout(self.device).await;
 
@@ -71,13 +68,10 @@ impl Element for KeyboardLayout {
             self.device
         );
 
-        (
-            KeyboardLayoutWidget,
-            State {
-                button: ctx.new_child(id, self.button),
-                _token: token
-            }
-        )
+        State {
+            button: ctx.new_child(id, self.button),
+            _token: token
+        }
     }
 }
 
@@ -99,13 +93,12 @@ impl Widget for KeyboardLayoutWidget {
     fn task_result(handle: StateHandle<Self::State>, ctx: &mut Context, data: Box<dyn Any>) {
         let event = data.downcast::<KeyboardLayoutChanged>().unwrap();
         let button = ctx.tree[handle].button;
+        let text = button.child(ctx);
 
         match event.layout {
-            Some(layout) =>
-                ctx.message(button, text::Message::SetText(layout.into())),
-            None =>
-                ctx.message(button, text::Message::SetText("n/a".into()))
-        };
+            Some(layout) => text.set_text(ctx, layout),
+            None => text.set_text(ctx, "n/a")
+        }
     }
 
     fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {

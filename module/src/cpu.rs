@@ -15,6 +15,7 @@ pub struct Cpu {
     style: Option<text::StyleFn>
 }
 
+#[derive(Default)]
 pub struct CpuWidget;
 
 pub struct State {
@@ -43,12 +44,8 @@ fn format(value: f64) -> String {
 
 impl Element for Cpu {
     type Widget = CpuWidget;
-    type Message = ();
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let mut rx = sys_info::CPU.subscribe(ctx.ui.runtime_handle());
         let task = Task::with_sender(id, |sender: ValueSender<f64>| {
             async move {
@@ -68,12 +65,10 @@ impl Element for Cpu {
             None => Text::new(text),
         };
         
-        let state = State {
+        State {
             text: ctx.new_child(id, text),
             handle
-        };
-
-        (CpuWidget, state)
+        }
     }
 }
 
@@ -92,7 +87,8 @@ impl Widget for CpuWidget {
         let usage = *data.downcast::<f64>().unwrap();
         let text = format(usage);
 
-        ctx.message(ctx.tree[handle].text, text::Message::SetText(text));
+        let child = ctx.tree[handle].text;
+        child.set_text(ctx, text);
     }
 
     fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {

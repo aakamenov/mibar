@@ -1,8 +1,7 @@
 use crate::{
     asset_loader::{AssetSource, AssetDataSource, AssetId, LoadResult},
     renderer::ImageCacheHandle,
-    DrawCtx, LayoutCtx, Context, Size, Rect, StateHandle, Id
-
+    DrawCtx, LayoutCtx, Context, Size, Rect, StateHandle, Id, TypedId
 };
 use super::{Element, Widget, SizeConstraints};
 
@@ -11,17 +10,13 @@ pub struct Image {
     source: AssetSource
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ImageWidget;
 
 #[derive(Debug)]
 pub struct State {
     id: AssetId,
     handle: ImageCacheHandle
-}
-
-pub enum Message {
-    ChangeSource(AssetSource)
 }
 
 impl Image {
@@ -33,12 +28,8 @@ impl Image {
 
 impl Element for Image {
     type Widget = ImageWidget;
-    type Message = Message;
 
-    fn make_widget(self, widget_id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, widget_id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let id = AssetId::new(&self.source);
         let mut handle = ctx.ui.image_cache_handle;
 
@@ -46,34 +37,7 @@ impl Element for Image {
             ctx.load_asset(widget_id, self.source);
         }
 
-        (ImageWidget, State { id, handle })
-    }
-
-    fn message(
-        handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut Context,
-        msg: Self::Message
-    ) {
-        let state = &mut ctx.tree[handle];
-
-        match msg {
-            Message::ChangeSource(source) => {
-                let id = AssetId::new(&source);
-
-                if id == state.id {
-                    return;
-                }
-
-                state.handle.decrease_ref_count(state.id);
-                state.id = id;
-
-                if !state.handle.increase_ref_count(id) {
-                    ctx.load_asset(handle.id(), source);
-                } else {
-                    ctx.ui.request_layout();
-                }
-            }
-        }    
+        State { id, handle }
     }
 }
 
@@ -133,5 +97,30 @@ impl Widget for ImageWidget {
 
     fn destroy(mut state: Self::State) {
         state.handle.decrease_ref_count(state.id)
+    }
+}
+
+impl TypedId<Image> {
+    pub fn change_source(
+        self,
+        ctx: &mut Context,
+        source: impl Into<AssetDataSource>
+    ) {
+        let source = AssetSource::Image(source.into());
+        let state = &mut ctx.tree[self];
+        let id = AssetId::new(&source);
+
+        if id == state.id {
+            return;
+        }
+
+        state.handle.decrease_ref_count(state.id);
+        state.id = id;
+
+        if !state.handle.increase_ref_count(id) {
+            ctx.load_asset(self, source);
+        } else {
+            ctx.ui.request_layout();
+        }
     }
 }

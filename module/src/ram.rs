@@ -15,6 +15,7 @@ pub struct Ram {
     style: Option<text::StyleFn>
 }
 
+#[derive(Default)]
 pub struct RamWidget;
 
 pub struct State {
@@ -46,12 +47,8 @@ fn format(ram: RamUsage) -> String {
 
 impl Element for Ram {
     type Widget = RamWidget;
-    type Message = ();
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let mut rx = sys_info::RAM.subscribe(ctx.ui.runtime_handle());
         let task = Task::with_sender(id, |sender: ValueSender<RamUsage>| {
             async move {
@@ -71,12 +68,10 @@ impl Element for Ram {
             None => Text::new(text),
         };
 
-        let state = State {
+        State {
             text: ctx.new_child(id, text),
             handle
-        };
-
-        (RamWidget, state)
+        }
     }
 }
 
@@ -95,7 +90,8 @@ impl Widget for RamWidget {
         let usage = *data.downcast::<RamUsage>().unwrap();
         let text = format(usage);
 
-        ctx.message(ctx.tree[handle].text, text::Message::SetText(text));
+        let child = ctx.tree[handle].text;
+        child.set_text(ctx, text);
     }
 
     fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {

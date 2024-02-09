@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, ops::{Deref, DerefMut}};
 
 use crate::{
-    DrawCtx, LayoutCtx, Context,
+    DrawCtx, LayoutCtx, Context, TypedId,
     Id, Event, Size, Rect, StateHandle
 };
 
@@ -20,11 +20,6 @@ pub struct AppState<
 
 pub struct StateWidget<T> {
     data: PhantomData<T>
-}
-
-pub enum Message<T> {
-    Mutate(fn(&mut T)),
-    MutateClosure(Box<dyn FnOnce(&mut T)>)
 }
 
 pub struct State<T> {
@@ -58,33 +53,14 @@ impl<
     F: FnOnce(&mut T, StateHandle<State<T>>) -> E
 > Element for AppState<T, E, S, F> {
     type Widget = StateWidget<T>;
-    type Message = Message<T>;
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let mut state = (self.create_state)(ctx);
         let handle = StateHandle::new(id.0);
 
         let child = ctx.new_child(id, (self.create_child)(&mut state, handle)).into();
 
-        (
-            StateWidget { data: PhantomData },
-            State { state, child }
-        )
-    }
-
-    fn message(
-        handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut Context,
-        msg: Self::Message
-    ) {
-        let state = &mut ctx.tree[handle];
-        match msg {
-            Message::Mutate(mutate) => mutate(&mut state.state),
-            Message::MutateClosure(mutate) => mutate(&mut state.state)
-        }
+        State { state, child }
     }
 }
 
@@ -121,5 +97,24 @@ impl<T> DerefMut for State<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.state
+    }
+}
+
+impl<
+    T: 'static,
+    E: Element + 'static,
+    S: FnOnce(&mut Context) -> T,
+    F: FnOnce(&mut T, StateHandle<State<T>>) -> E
+> TypedId<AppState<T, E, S, F>> {
+    #[inline]
+    pub fn mutate_state(self, ctx: &mut Context, f: impl FnOnce(&mut T)) {
+        let state = &mut ctx.tree[self].state;
+        f(state);
+    }
+}
+
+impl<T> Default for StateWidget<T> {
+    fn default() -> Self {
+        Self { data: PhantomData }
     }
 }

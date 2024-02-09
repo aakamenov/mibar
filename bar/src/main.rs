@@ -21,7 +21,8 @@ use mibar::{
         side_panel::{self, SidePanel},
         WindowId, WindowDimensions
     },
-    Theme, Font, Family, Color, QuadStyle, StateHandle, run
+    Theme, Font, Family, Color, QuadStyle,
+    StateHandle, Context, Id, run
 };
 
 // Color palette: https://coolors.co/232f2e-293635-aca695-d9ddde-ff8000-70d900-ff4c57-00dbd7-ff64a2
@@ -96,7 +97,7 @@ fn theme() -> Theme {
     )
 }
 
-fn build() -> impl Element {
+fn build(ctx: &mut Context) -> Id {
     AppState::new(|_| BarState { power_menu: None }, |_, handle| {
         Flex::row()
             .spacing(SPACING)
@@ -127,6 +128,8 @@ fn build() -> impl Element {
                 builder.flex(right, 1f32);
             })
     })
+    .make(ctx)
+    .into()
 }
 
 fn boot_menu_button(handle: StateHandle<State<BarState>>) -> Button<Text> {
@@ -167,7 +170,7 @@ fn boot_menu_button(handle: StateHandle<State<BarState>>) -> Button<Text> {
     })
 }
 
-fn boot_menu_panel() -> impl Element {
+fn boot_menu_panel(ctx: &mut Context) -> Id {
     fn button_style(state: ButtonState, color: Color) -> button::Style {
         let (bg, text_color) = match state {
             ButtonState::Normal => (Color::TRANSPARENT, color),
@@ -217,6 +220,8 @@ fn boot_menu_panel() -> impl Element {
             .style(|state| button_style(state, PRIMARY_ORANGE))
         });
     })
+    .make(ctx)
+    .into()
 }
 
 fn battery_style(capacity: u8) -> battery::Style {

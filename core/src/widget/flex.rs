@@ -6,10 +6,10 @@ use crate::{
     geometry::{Size, Rect},
     draw::{Quad, QuadStyle},
     reactive::{
-        reactive_list::{ReactiveList, Binding, ListOp},
+        reactive_list::{ReactiveList, UniqueKey, ListOp},
         event_emitter::EventHandler
     },
-    DrawCtx, LayoutCtx, Context, Event, Id, StateHandle
+    DrawCtx, LayoutCtx, Context, Event, Id, TypedId, StateHandle
 };
 use super::{
     SizeConstraints, Padding,
@@ -33,9 +33,8 @@ pub struct StaticFlex<F: FnOnce(&mut StaticFlexBuilder)> {
     params: Flex
 }
 
-pub struct DynamicFlex<T> {
+pub struct DynamicFlex<T: UniqueKey> {
     create: CreateChildFn<T>,
-    binding: Binding<T>,
     params: Flex
 }
 
@@ -95,14 +94,16 @@ impl Flex {
     }
 
     #[inline]
-    pub fn bind<T: 'static>(
+    pub fn bind<T: UniqueKey + 'static>(
         self,
+        ctx: &mut Context,
         list: &ReactiveList<T>,
         create: CreateChildFn<T>
-    ) -> DynamicFlex<T> {
-        let binding = list.create_binding::<DynamicFlex<T>>();
+    ) -> TypedId<DynamicFlex<T>> {
+        let id = DynamicFlex { create, params: self }.make(ctx);
+        list.subscribe(ctx, id);
 
-        DynamicFlex { create, binding, params: self }
+        id
     }
 
     #[inline]
@@ -187,12 +188,8 @@ impl<'a: 'b, 'b> DynamicFlexBuilder<'a, 'b> {
 
 impl<F: FnOnce(&mut StaticFlexBuilder)> Element for StaticFlex<F> {
     type Widget = FlexWidget<()>;
-    type Message = ();
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State{
         let mut children = SmallVec::new();
         let mut builder = StaticFlexBuilder {
             id,
@@ -202,7 +199,7 @@ impl<F: FnOnce(&mut StaticFlexBuilder)> Element for StaticFlex<F> {
 
         (self.build)(&mut builder);
 
-        let state = State {
+        State {
             children,
             axis: self.params.axis,
             main_alignment: self.params.main_alignment,
@@ -211,23 +208,15 @@ impl<F: FnOnce(&mut StaticFlexBuilder)> Element for StaticFlex<F> {
             padding: self.params.padding,
             style: self.params.style,
             create_child: |_, _| { unreachable!() }
-        };
-        
-        (FlexWidget { data: PhantomData }, state)
+        }
     }
 }
 
-impl<T: 'static> Element for DynamicFlex<T> {
+impl<T: UniqueKey + 'static> Element for DynamicFlex<T> {
     type Widget = FlexWidget<T>;
-    type Message = ();
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
-        self.binding.bind(id, ctx.event_queue);
-
-        let state = State {
+    fn make_state(self, _id: Id, _ctx: &mut Context) -> <Self::Widget as Widget>::State {
+        State {
             children: SmallVec::new(),
             axis: self.params.axis,
             main_alignment: self.params.main_alignment,
@@ -236,9 +225,7 @@ impl<T: 'static> Element for DynamicFlex<T> {
             padding: self.params.padding,
             style: self.params.style,
             create_child: self.create
-        };
-        
-        (FlexWidget { data: PhantomData }, state)
+        }
     }
 }
 
@@ -405,10 +392,10 @@ impl<T: 'static> Widget for FlexWidget<T> {
     }
 }
 
-impl<T: 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
+impl<T: UniqueKey + 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
     fn handle(
-        ctx: &mut Context,
         handle: StateHandle<Self::State>,
+        ctx: &mut Context,
         event: &ListOp<T>
     ) {
         match event {
@@ -424,13 +411,13 @@ impl<T: 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
                     ctx.tree[handle].children.push(result);
                 }
             }
-            ListOp::Push(item) => {
-                let id = handle.id();
-                let create_child = ctx.tree[handle].create_child;
-
-                let result = create_child(DynamicFlexBuilder { id, ctx }, item);
-                ctx.tree[handle].children.push(result);
-            }
+            ListOp::Changes(_) => { }
         }
+    }
+}
+
+impl<T> Default for FlexWidget<T> {
+    fn default() -> Self {
+        Self { data: PhantomData }
     }
 }

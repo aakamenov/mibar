@@ -25,6 +25,7 @@ pub struct Battery {
     interval: Duration
 }
 
+#[derive(Default)]
 pub struct BatteryWidget;
 
 pub struct State {
@@ -62,12 +63,8 @@ impl Battery {
 
 impl Element for Battery {
     type Widget = BatteryWidget;
-    type Message = ();
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let task = Task::with_sender(id, |sender: ValueSender<BatteryInfoState>| {
             async move {
                 let mut interval = interval(self.interval);
@@ -109,16 +106,14 @@ impl Element for Battery {
         let mut font = ctx.ui.theme().font;
         font.weight = Weight::BOLD;
 
-        let state = State {
+        State {
             info: BatteryInfoState::InitialRead,
             style: self.style,
             text: String::from("0"),
             font,
             text_dimensions: Size::ZERO,
             handle
-        };
-
-        (BatteryWidget, state)
+        }
     }
 }
 

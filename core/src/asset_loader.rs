@@ -103,15 +103,6 @@ impl Hash for AssetId {
 
 impl nohash::IsEnabled for AssetId { }
 
-impl AssetSource {
-    #[inline]
-    pub fn data_source(&self) -> &AssetDataSource {
-        match self {
-            Self::Image(src) => &src
-        }
-    }
-}
-
 impl From<AssetDataSource> for AssetSource {
     #[inline]
     fn from(src: AssetDataSource) -> Self {

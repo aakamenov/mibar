@@ -4,8 +4,7 @@ use smallvec::SmallVec;
 
 use crate::{
     widget::{Element, Widget},
-    Context, RawWidgetId, TypedId,
-    StateHandle, EventSource, EventQueue, Id
+    Context, RawWidgetId, TypedId, StateHandle, Id
 };
 
 type EventHandlerFn<E> = fn(
@@ -16,8 +15,8 @@ type EventHandlerFn<E> = fn(
 
 pub trait EventHandler<E>: Widget {
     fn handle(
-        ctx: &mut Context,
         handle: StateHandle<Self::State>,
+        ctx: &mut Context,
         event: &E
     );
 }
@@ -27,27 +26,10 @@ pub struct EventEmitter<E> {
     state: Rc<RefCell<State<E>>>
 }
 
-pub struct Binding<E> {
-    pub(crate) target: EventEmitter<E>,
-    handler: EventHandlerFn<E>,
-}
-
 #[derive(Debug)]
 pub struct Subscriber<E> {
     id: RawWidgetId,
     handler: EventHandlerFn<E>
-}
-
-pub struct Event<E> {
-    event: E,
-    state: Rc<RefCell<State<E>>>,
-    callback: Option<Box<dyn FnOnce(&mut Context, E)>>
-}
-
-pub struct SubscriberEvent<E> {
-    event: E,
-    subscriber: Subscriber<E>,
-    callback: Option<Box<dyn FnOnce(&mut Context, E)>>
 }
 
 #[derive(Debug)]
@@ -68,37 +50,27 @@ impl<E> EventEmitter<E> {
     }
 
     #[inline]
-    pub fn subscribe<T: Element>(&self, id: &TypedId<T>)
+    pub fn subscribe<T: Element>(&self, id: TypedId<T>)
         where T::Widget: EventHandler<E>
     {
         let handler = |id: RawWidgetId, ctx: &mut Context, event: &E| {
-            T::Widget::handle(ctx, StateHandle::new(id), event);
+            T::Widget::handle(StateHandle::new(id), ctx, event);
         };
 
         self.add_subscriber(id.raw(), handler);
     }
 
     #[inline]
-    pub fn create_binding<T: Element>(&self) -> Binding<E>
-        where T::Widget: EventHandler<E>
-    {
-        let handler = |id: RawWidgetId, ctx: &mut Context, event: &E| {
-            T::Widget::handle(ctx, StateHandle::new(id), event);
-        };
+    pub fn emit(&self, ctx: &mut Context, event: &E) {
+        self.state.borrow_mut().subscribers.retain(
+            |x| ctx.tree.widgets.contains_key(x.id)
+        );
 
-        Binding {
-            target: self.clone(),
-            handler
-        }
-    }
+        let len = self.state.borrow().subscribers.len();
 
-    #[inline]
-    #[must_use = "You should give this to ctx.event_queue.schedule()."]
-    pub fn emit(&self, event: E) -> Event<E> {
-        Event {
-            event,
-            state: self.state.clone(),
-            callback: None
+        for i in 0..len {
+            let sub = self.state.borrow().subscribers[i];
+            sub.call(ctx, event);
         }
     }
 
@@ -122,128 +94,20 @@ impl<E> EventEmitter<E> {
     }
 }
 
-impl<E> Event<E> {
-    #[inline]
-    #[must_use = "You should give this to ctx.event_queue.schedule()."]
-    pub fn and_then(
-        mut self,
-        callback: impl FnOnce(&mut Context, E) + 'static
-    ) -> Self {
-        self.callback = Some(Box::new(callback));
-
-        self
-    }
-}
-
 impl<E> Subscriber<E> {
     #[inline]
-    #[must_use = "You should give this to ctx.event_queue.schedule()."]
-    pub fn emit(self, event: E) -> SubscriberEvent<E> {
-        SubscriberEvent {
-            event,
-            subscriber: self,
-            callback: None
-        }
+    pub fn call(&self, ctx: &mut Context, event: &E) {
+        (self.handler)(self.id, ctx, event);
     }
 }
 
-impl<E> SubscriberEvent<E> {
-    #[inline]
-    #[must_use = "You should give this to ctx.event_queue.schedule()."]
-    pub fn and_then(
-        mut self,
-        callback: impl FnOnce(&mut Context, E) + 'static
-    ) -> Self {
-        self.callback = Some(Box::new(callback));
-
-        self
-    }
-}
-
-impl<E: 'static> EventSource for Event<E> {
-    #[inline]
-    fn emit(self, queue: &EventQueue) {
-        let Self { event, state, callback } = self;
-
-        // This logic is written in the shittiest way possible but
-        // it has to be in order to make Rust happy :)
-        queue.action(move |ctx| {
-            state.borrow_mut().subscribers.retain(
-                |x| ctx.tree.widgets.contains_key(x.id)
-            );
-
-            let len = state.borrow().subscribers.len();
-
-            if len == 0 {
-                if let Some(callback) = callback {
-                    callback(ctx, event);
-                }
-
-                return;
-            }
-
-            if len == 1 {
-                let sub = state.borrow().subscribers[0];
-                (sub.handler)(sub.id, ctx, &event);
-
-                if let Some(callback) = callback {
-                    callback(ctx, event);
-                }
-
-            } else {
-                let mut index = 0;
-
-                while index < len - 1 {
-                    let sub = state.borrow().subscribers[index];
-                    (sub.handler)(sub.id, ctx, &event);
-
-                    index += 1;
-                }
-
-                let sub = state.borrow().subscribers[index];
-                (sub.handler)(sub.id, ctx, &event);
-
-                if let Some(callback) = callback {
-                    callback(ctx, event);
-                }
-            }
-        });
-    }
-}
-
-impl<E: 'static> EventSource for SubscriberEvent<E> {
-    fn emit(self, queue: &EventQueue) {
-        let Self { event, subscriber, callback } = self;
-
-        queue.action(move |ctx| {
-            (subscriber.handler)(subscriber.id, ctx, &event);
-
-            if let Some(callback) = callback {
-                callback(ctx, event);
-            }
-        });
-    }
-}
-
-impl<E> Binding<E> {
-    #[inline]
-    pub fn bind(self, id: impl Into<Id>) {
-        let id = id.into().0;
-        let handler = self.handler;
-
-        self.target.state.borrow_mut()
-            .subscribers
-            .push(Subscriber { id, handler });
-    }
-}
-
-impl<Event> Clone for EventEmitter<Event> {
+impl<E> Clone for EventEmitter<E> {
     fn clone(&self) -> Self {
         Self { state: Rc::clone(&self.state) }
     }
 }
 
-impl<Event> Clone for Subscriber<Event> {
+impl<E> Clone for Subscriber<E> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -253,4 +117,4 @@ impl<Event> Clone for Subscriber<Event> {
     }
 }
 
-impl<Event> Copy for Subscriber<Event> { }
+impl<E> Copy for Subscriber<E> { }

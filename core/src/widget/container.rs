@@ -19,8 +19,8 @@ pub struct Style {
     pub text_color: Option<Color>
 }
 
-pub struct Container<E: Element> {
-    child: E,
+pub struct Container<T: Element> {
+    child: T,
     style: Option<StyleFn>,
     padding: Padding,
     width: Length,
@@ -29,12 +29,12 @@ pub struct Container<E: Element> {
     vertical_align: Alignment
 }
 
-pub struct ContainerWidget<E: Element> {
-    data: PhantomData<E>
+pub struct ContainerWidget<T: Element> {
+    data: PhantomData<T>
 }
 
-pub struct State<E: Element> {
-    child: TypedId<E>,
+pub struct State<T: Element> {
+    child: TypedId<T>,
     style: Option<StyleFn>,
     padding: Padding,
     width: Length,
@@ -43,9 +43,9 @@ pub struct State<E: Element> {
     vertical_align: Alignment
 }
 
-impl<E: Element> Container<E> {
+impl<T: Element> Container<T> {
     #[inline]
-    pub fn new(child: E) -> Self {
+    pub fn new(child: T) -> Self {
         Self {
             child,
             style: None,
@@ -100,41 +100,24 @@ impl<E: Element> Container<E> {
     }
 }
 
-impl<E: Element + 'static> Element for Container<E> {
-    type Widget = ContainerWidget<E>;
-    type Message = E::Message;
+impl<T: Element + 'static> Element for Container<T> {
+    type Widget = ContainerWidget<T>;
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
-        (
-            ContainerWidget { data: PhantomData },
-            State {
-                child: ctx.new_child(id, self.child),
-                style: self.style,
-                padding: self.padding,
-                width: self.width,
-                height: self.height,
-                horizontal_align: self.horizontal_align,
-                vertical_align: self.vertical_align
-            }
-        )
-    }
-
-    fn message(
-        handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut Context,
-        msg: Self::Message
-    ) {
-        let child = ctx.tree[handle].child;
-
-        ctx.message(child, msg)
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
+        State {
+            child: ctx.new_child(id, self.child),
+            style: self.style,
+            padding: self.padding,
+            width: self.width,
+            height: self.height,
+            horizontal_align: self.horizontal_align,
+            vertical_align: self.vertical_align
+        }
     }
 }
 
-impl<E: Element + 'static> Widget for ContainerWidget<E> {
-    type State = State<E>;
+impl<T: Element + 'static> Widget for ContainerWidget<T> {
+    type State = State<T>;
 
     fn layout(
         handle: StateHandle<Self::State>,
@@ -220,4 +203,17 @@ pub fn layout_child(
     });
 
     size
+}
+
+impl<T: Element + 'static> TypedId<Container<T>> {
+    #[inline]
+    pub fn child(self, ctx: &mut Context) -> TypedId<T> {
+        ctx.tree[self].child
+    }
+}
+
+impl<T: Element> Default for ContainerWidget<T> {
+    fn default() -> Self {
+        Self { data: PhantomData }
+    }
 }

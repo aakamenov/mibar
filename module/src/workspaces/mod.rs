@@ -1,6 +1,7 @@
 mod button;
 
 pub use button::{StyleFn, Style, ButtonStyle};
+use button::{Button, ButtonId, WorkspaceStatus};
 
 use std::{any::Any, mem::MaybeUninit};
 
@@ -18,10 +19,12 @@ const SPACING: f32 = 4f32;
 pub struct Workspaces {
     style: StyleFn
 }
+
+#[derive(Default)]
 pub struct WorkspacesWidget;
 
 pub struct State {
-    buttons: [TypedId<button::Button>; WORKSPACE_COUNT],
+    buttons: [TypedId<Button>; WORKSPACE_COUNT],
     _token: SubscriptionToken<ValueSender<WorkspacesChanged>>
 }
 
@@ -34,34 +37,31 @@ impl Workspaces {
 
 impl Element for Workspaces {
     type Widget = WorkspacesWidget;
-    type Message = ();
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let token = hyprland::subscribe_workspaces(
             ctx.ui.runtime_handle(),
             ctx.ui.window_id(),
             ctx.ui.value_sender(id)
         );
 
-        let mut buttons: MaybeUninit<[TypedId<button::Button>; WORKSPACE_COUNT]> =
+        let mut buttons: MaybeUninit<[TypedId<Button>; WORKSPACE_COUNT]> =
             MaybeUninit::uninit();
 
         for i in 0..WORKSPACE_COUNT {
             let button = ctx.new_child(
                 id,
-                button::Button::new((i + 1) as u8, self.style)
+                Button::new((i + 1) as u8, self.style)
             );
             unsafe {
                 buttons.assume_init_mut()[i] = button;
             }
         }
 
-        let buttons = unsafe { buttons.assume_init() };
-
-        (WorkspacesWidget, State { buttons, _token: token })
+        State {
+            buttons: unsafe { buttons.assume_init() },
+            _token: token
+        }
     }
 }
 
@@ -105,11 +105,13 @@ impl Widget for WorkspacesWidget {
 
             empty[index] = false;
 
-            let msg = button::WorkspaceStatus {
+            let msg = WorkspaceStatus {
                 is_current: workspace.id == event.current,
                 num_windows: workspace.num_windows
             };
-            ctx.message(ctx.tree[handle].buttons[index], msg);
+
+            let button = ButtonId(ctx.tree[handle].buttons[index]);
+            button.set_status(ctx, msg);
         }
 
         for (i, is_empty) in empty.into_iter().enumerate() {
@@ -117,11 +119,13 @@ impl Widget for WorkspacesWidget {
                 continue;
             }
 
-            let msg = button::WorkspaceStatus {
+            let msg = WorkspaceStatus {
                 is_current: i + 1 == event.current as usize,
                 num_windows: 0
             };
-            ctx.message(ctx.tree[handle].buttons[i], msg);
+
+            let button = ButtonId(ctx.tree[handle].buttons[i]);
+            button.set_status(ctx, msg);
         }
     }
 

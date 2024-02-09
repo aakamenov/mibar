@@ -27,8 +27,8 @@ pub enum ButtonState {
     Active
 }
 
-pub struct Button<E: Element> {
-    child: E,
+pub struct Button<T: Element> {
+    child: T,
     on_click: Action,
     style: Option<StyleFn>,
     padding: Padding,
@@ -36,12 +36,12 @@ pub struct Button<E: Element> {
     height: Length
 }
 
-pub struct ButtonWidget<E: Element> {
-    data: PhantomData<E>
+pub struct ButtonWidget<T: Element> {
+    data: PhantomData<T>
 }
 
-pub struct State<E: Element> {
-    child: TypedId<E>,
+pub struct State<T: Element> {
+    child: TypedId<T>,
     on_click: Action,
     style: Option<StyleFn>,
     padding: Padding,
@@ -61,10 +61,10 @@ impl Button<Text> {
     }
 }
 
-impl<E: Element> Button<E> {
+impl<T: Element> Button<T> {
     #[inline]
     pub fn with_child(
-        child: E,
+        child: T,
         on_click: impl Fn(&mut Context) + 'static
     ) -> Self {
         Self {
@@ -106,42 +106,25 @@ impl<E: Element> Button<E> {
     }
 }
 
-impl<E: Element + 'static> Element for Button<E> {
-    type Widget = ButtonWidget<E>;
-    type Message = E::Message;
+impl<T: Element + 'static> Element for Button<T> {
+    type Widget = ButtonWidget<T>;
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
-        (
-            ButtonWidget { data: PhantomData },
-            State {
-                child: ctx.new_child(id, self.child),
-                on_click: self.on_click,
-                style: self.style,
-                is_hovered: false,
-                is_active: false,
-                padding: self.padding,
-                width: self.width,
-                height: self.height
-            }
-        )
-    }
-
-    fn message(
-        handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut Context,
-        msg: Self::Message
-    ) {
-        let child = ctx.tree[handle].child;
-
-        ctx.message(child, msg)
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
+        State {
+            child: ctx.new_child(id, self.child),
+            on_click: self.on_click,
+            style: self.style,
+            is_hovered: false,
+            is_active: false,
+            padding: self.padding,
+            width: self.width,
+            height: self.height
+        }
     }
 }
 
-impl<E: Element + 'static> Widget for ButtonWidget<E> {
-    type State = State<E>;
+impl<T: Element + 'static> Widget for ButtonWidget<T> {
+    type State = State<T>;
 
     fn layout(
         handle: StateHandle<Self::State>,
@@ -221,7 +204,7 @@ impl<E: Element + 'static> Widget for ButtonWidget<E> {
     }
 }
 
-impl<E: Element> State<E> {
+impl<T: Element> State<T> {
     #[inline]
     fn current_state(&self) -> ButtonState {
         if self.is_active {
@@ -231,5 +214,18 @@ impl<E: Element> State<E> {
         } else {
             ButtonState::Normal
         }
+    }
+}
+
+impl<T: Element + 'static> TypedId<Button<T>> {
+    #[inline]
+    pub fn child(self, ctx: &mut Context) -> TypedId<T> {
+        ctx.tree[self].child
+    }
+}
+
+impl<T: Element> Default for ButtonWidget<T> {
+    fn default() -> Self {
+        Self { data: PhantomData }
     }
 }

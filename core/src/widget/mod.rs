@@ -6,6 +6,8 @@ pub mod container;
 pub mod state;
 mod layout;
 
+use std::rc::Rc;
+
 pub use layout::*; 
 pub use flex::{Flex, StaticFlexBuilder};
 pub use text::Text;
@@ -17,27 +19,29 @@ pub use state::{AppState, State};
 use std::any::{Any, type_name};
 
 use crate::{
-    DrawCtx, LayoutCtx, Context, Id,
-    Event, StateHandle, Size, Rect
+    Context, DrawCtx, Event, Id, TypedId,
+    LayoutCtx, Rect, Size, StateHandle,
+    WidgetState
 };
 
-pub trait Element {
+pub trait Element: Sized {
     type Widget: Widget + 'static;
-    type Message;
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    );
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State;
 
-    fn message(
-        _handle: StateHandle<<Self::Widget as Widget>::State>,
-        _ctx: &mut Context,
-        _msg: Self::Message
-    ) { }
+    fn make(self, ctx: &mut Context) -> TypedId<Self> {
+        let id = ctx.tree.widgets.insert(
+            WidgetState::new(Rc::new(Self::Widget::default()), Box::new(()))
+        );
+
+        let state = Self::make_state(self, Id(id), ctx);
+        ctx.tree.widgets[id].state = Box::new(state);
+
+        TypedId::new(id)
+    }
 }
 
-pub trait Widget {
+pub trait Widget: Default {
     type State: 'static;
 
     fn layout(handle: StateHandle<Self::State>, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size;
@@ -59,16 +63,6 @@ pub trait AnyWidget {
     fn task_result(&self, id: Id, _ctx: &mut Context, _data: Box<dyn Any>);
     fn destroy(&self, state: Box<dyn Any + 'static>);
 }
-
-// You may wonder why Box<dyn Any + 'static> is used instead of Box<dyn Any> or just
-// &mut dyn Any for the state variable. Because the downcast_mut() call used below won't
-// succeed otherwise... Looking at the docs for Any (https://doc.rust-lang.org/std/any/trait.Any.html)
-// shows us that there are 3 implementations of that method. The one that is implemented on
-// dyn Any + 'static has the actual logic for downcasting and the other two are calling the
-// implementation of downcast_mut() for dyn Any which, seems to me, somehow erases the
-// concrete type. So if we don't set the dyn Any + 'static bound here, the correct call
-// for downcasting won't be invoked. I'm not 100% sure if that's what exactly is happening
-// here, but either way, does it make any sense and is it intuitive at all? Fuck no -_-
 
 impl<T: Widget> AnyWidget for T {
     #[inline]

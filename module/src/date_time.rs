@@ -16,6 +16,7 @@ pub struct DateTime {
     style: Option<text::StyleFn>
 }
 
+#[derive(Default)]
 pub struct DateTimeWidget;
 
 pub struct State {
@@ -59,12 +60,8 @@ fn get_time() -> (String, i32) {
 
 impl Element for DateTime {
     type Widget = DateTimeWidget;
-    type Message = ();
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         
         let (date, remaining) = get_time();
 
@@ -82,7 +79,7 @@ impl Element for DateTime {
             get_time()
         }));
 
-        (DateTimeWidget, state)
+        state
     }
 }
 
@@ -102,7 +99,8 @@ impl Widget for DateTimeWidget {
             get_time()
         }));
 
-        ctx.message(ctx.tree[handle].text, text::Message::SetText(result.0));
+        let child = ctx.tree[handle].text;
+        child.set_text(ctx, result.0);
     }
 
     fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {

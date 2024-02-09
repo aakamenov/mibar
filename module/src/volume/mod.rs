@@ -24,6 +24,7 @@ pub struct PulseAudioVolume {
     style: Option<text::StyleFn>
 }
 
+#[derive(Default)]
 pub struct PulseAudioVolumeWidget;
 
 pub struct State {
@@ -51,12 +52,8 @@ impl PulseAudioVolume {
 
 impl Element for PulseAudioVolume {
     type Widget = PulseAudioVolumeWidget;
-    type Message = ();
 
-    fn make_widget(self, id: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let task = Task::with_sender(id, |sender: ValueSender<pulseaudio::State>| {
             async move {
                 pulseaudio::init();
@@ -94,13 +91,11 @@ impl Element for PulseAudioVolume {
             None => Text::new(text),
         };
 
-        let state = State {
+        State {
             format: self.format,
             text: ctx.new_child(id, text),
             handle
-        };
-
-        (PulseAudioVolumeWidget, state)
+        }
     }
 }
 
@@ -139,7 +134,8 @@ impl Widget for PulseAudioVolumeWidget {
         let state = &ctx.tree[handle];
         let text = (state.format)(pa_state);
 
-        ctx.message(state.text, text::Message::SetText(text));
+        let child = state.text;
+        child.set_text(ctx, text);
     }
 
     fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, _layout: Rect) {

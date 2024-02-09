@@ -1,5 +1,5 @@
 use crate::{
-    DrawCtx, LayoutCtx, Context, StateHandle, Id,
+    DrawCtx, LayoutCtx, Context, StateHandle, Id, TypedId,
     Size, Rect, Font, Color, TextInfo, LineHeight
 };
 use super::{SizeConstraints, Element, Widget};
@@ -14,13 +14,8 @@ pub struct Text {
     style: Option<StyleFn>
 }
 
+#[derive(Default)]
 pub struct TextWidget;
-
-#[derive(Debug)]
-pub enum Message {
-    SetText(String),
-    SetStyle(StyleFn)
-}
 
 #[derive(Debug)]
 pub struct State {
@@ -74,44 +69,16 @@ impl Text {
 
 impl Element for Text {
     type Widget = TextWidget;
-    type Message = Message;
 
-    fn make_widget(self, _: Id, ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
+    fn make_state(self, _: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let theme = ctx.ui.theme();
 
-        (
-            TextWidget,
-            State {
-                text: self.text,
-                text_size: self.text_size.unwrap_or(theme.font_size),
-                font: self.font.unwrap_or(theme.font),
-                line_height: self.line_height.unwrap_or_default(),
-                style: self.style
-            }
-        )
-    }
-
-    fn message(
-        handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut Context,
-        msg: Self::Message
-    ) {
-        let state = &mut ctx.tree[handle];
-
-        match msg {
-            Message::SetText(text) => {
-                if text != state.text {
-                    state.text = text;
-                    ctx.ui.request_layout();
-                }
-            }
-            Message::SetStyle(style) => {
-                state.style = Some(style);
-                ctx.ui.request_redraw();
-            }
+        State {
+            text: self.text,
+            text_size: self.text_size.unwrap_or(theme.font_size),
+            font: self.font.unwrap_or(theme.font),
+            line_height: self.line_height.unwrap_or_default(),
+            style: self.style
         }
     }
 }
@@ -151,5 +118,22 @@ impl Widget for TextWidget {
         };
 
         ctx.renderer.fill_text(&info, rect, color);
+    }
+}
+
+impl TypedId<Text> {
+    pub fn set_text(self, ctx: &mut Context, text: impl Into<String>) {
+        let text = text.into();
+        let state = &mut ctx.tree[self];
+
+        if text != state.text {
+            state.text = text;
+            ctx.ui.request_layout();
+        }
+    }
+
+    pub fn set_style(self, ctx: &mut Context, style: StyleFn) {
+        ctx.tree[self].style = Some(style);
+        ctx.ui.request_redraw();
     }
 }

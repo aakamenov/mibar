@@ -1,38 +1,59 @@
 use std::{
-    cell::{RefCell, RefMut},
+    cell::{RefCell, RefMut, Ref},
     ops::{Deref, DerefMut},
+    hash::{Hash, Hasher},
     rc::Rc,
     fmt
 };
 
-use crate::{widget::Element, TypedId, Id, EventQueue, Context, EventSource};
-use super::event_emitter::{self, EventEmitter, EventHandler};
+use ahash::AHasher;
+use nohash::{IntSet, IsEnabled};
 
-pub struct ReactiveList<T> {
-    items: Rc<RefCell<Vec<T>>>,
+use crate::{widget::Element, TypedId, Context};
+use super::event_emitter::{EventEmitter, EventHandler};
+
+pub trait ReactiveListHandler<T: UniqueKey>: EventHandler<ListOp<T>>
+    where Self::State: ReactiveListHandlerState<T>
+{ }
+
+pub trait ReactiveListHandlerState<T: UniqueKey> {
+    fn add(&mut self, ctx: &mut Context, item: &T);
+}
+
+pub trait UniqueKey: Hash + Eq { }
+
+pub struct ReactiveList<T: UniqueKey> {
+    items: Rc<RefCell<State<T>>>,
     emitter: EventEmitter<ListOp<T>>
 }
 
-pub struct Event<T> {
-    callback: Option<Box<dyn FnOnce(&mut Context)>>,
-    inner: event_emitter::Event<ListOp<T>>
-}
-
-pub enum ListOp<T> {
+pub enum ListOp<T: UniqueKey> {
     Init(ListRef<T>),
-    Push(T)
+    Changes(ListDiff<T>)
 }
 
-pub struct Binding<T> {
-    target: ReactiveList<T>,
-    inner: event_emitter::Binding<ListOp<T>>
+pub struct ListDiff<T: UniqueKey> {
+    state: Rc<RefCell<State<T>>>,
+    diff: Vec<DiffEntry>
 }
 
-pub struct ListSlice<'a, T>(RefMut<'a, Vec<T>>);
+pub struct ListSlice<'a, T>(Ref<'a, State<T>>);
+pub struct ListSliceMut<'a, T>(RefMut<'a, State<T>>);
 
-pub struct ListRef<T>(Rc<RefCell<Vec<T>>>);
+pub struct ListRef<T>(Rc<RefCell<State<T>>>);
 
-impl<T> ReactiveList<T> {
+struct State<T> {
+    items: Vec<T>,
+    items_hashed: IntSet<DiffEntry>
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct DiffEntry {
+    index: usize,
+    key: u64
+}
+
+impl<T: UniqueKey> ReactiveList<T> {
     #[inline]
     pub fn new() -> Self {
         Self::from_vec(Vec::new())
@@ -41,7 +62,7 @@ impl<T> ReactiveList<T> {
     #[inline]
     pub fn from_vec(items: Vec<T>) -> Self {
         Self {
-            items: Rc::new(RefCell::new(items)),
+            items: Rc::new(RefCell::new(State::new(items))),
             emitter: EventEmitter::new(),
         }
     }
@@ -52,95 +73,85 @@ impl<T> ReactiveList<T> {
     }
 
     #[inline]
-    pub fn subscribe<E: Element>(&self, id: &TypedId<E>, queue: &EventQueue)
+    pub fn subscribe<E: Element>(&self, ctx: &mut Context, id: TypedId<E>)
         where
             E::Widget: EventHandler<ListOp<T>>,
             T: 'static
     {
         self.emitter.subscribe(id);
-        self.init_subscriber(queue);
-    }
 
-    #[inline]
-    pub fn create_binding<E: Element>(&self) -> Binding<T>
-        where E::Widget: EventHandler<ListOp<T>>
-    {
-        Binding {
-            target: self.clone(),
-            inner: self.emitter.create_binding::<E>()
-        }
+        let subscriber = self.emitter.last_added().unwrap();
+        let op = ListOp::Init(ListRef(self.items.clone()));
+
+        subscriber.call(ctx, &op);
     }
 
     #[inline]
     pub fn as_slice(&self) -> ListSlice<'_, T> {
-        ListSlice(self.items.borrow_mut())
+        ListSlice(self.items.borrow())
     }
 
     #[inline]
-    #[must_use = "You should give this to ctx.event_queue.schedule()."]
-    pub fn push(&self, item: T) -> Event<T>
-        where T: 'static
-    {
-        let items = self.items.clone();
+    pub fn as_mut_slice(&self) -> ListSliceMut<'_, T> {
+        ListSliceMut(self.items.borrow_mut())
+    }
 
-        let inner = self.emitter.emit(ListOp::Push(item)).and_then(move |_, event| {
-            let ListOp::Push(item) = event else {
-                unreachable!();
-            };
+    pub fn mutate(&self, ctx: &mut Context, f: impl FnOnce(&mut Vec<T>)) {
+        let mut state = self.items.borrow_mut();
+        f(&mut state.items);
 
-            items.borrow_mut().push(item);
+        let diff = state.compute_diff();
+        let event = ListOp::Changes(ListDiff {
+            state: self.items.clone(),
+            diff
         });
 
-        Event { callback: None, inner }
-    }
-
-    #[inline]
-    fn init_subscriber(&self, queue: &EventQueue)
-        where T: 'static
-    {
-        let subscriber = self.emitter.last_added().unwrap();
-        let op = ListOp::Init(ListRef(self.items.clone()));
-
-        queue.schedule(subscriber.emit(op));
+        self.emitter.emit(ctx, &event);
     }
 }
 
-impl<E> Event<E> {
-    #[inline]
-    #[must_use = "You should give this to ctx.event_queue.schedule()."]
-    pub fn and_then(
-        mut self,
-        callback: impl FnOnce(&mut Context) + 'static
-    ) -> Self {
-        self.callback = Some(Box::new(callback));
+impl<T: UniqueKey> State<T> {
+    fn new(items: Vec<T>) -> Self {
+        let mut state = Self {
+            items,
+            items_hashed: IntSet::default()
+        };
 
-        self
+        state.compute_diff();
+
+        state
+    }
+
+    fn compute_diff(&mut self) -> Vec<DiffEntry> {
+        let new = self.items.iter()
+            .enumerate()
+            .map(|(index, x)| {
+                let mut hasher = AHasher::default();
+                x.hash(&mut hasher);
+
+                DiffEntry {
+                    index,
+                    key: hasher.finish()
+                }
+            })
+            .collect::<IntSet<DiffEntry>>();
+
+        let diff = new.difference(&self.items_hashed).copied().collect();
+        self.items_hashed = new;
+
+        diff
     }
 }
 
-impl<E: 'static> EventSource for Event<E> {
-    #[inline]
-    fn emit(self, queue: &EventQueue) {
-        self.inner.emit(queue);
-
-        if let Some(callback) = self.callback {
-            queue.action(callback);
-        }
-    }
-}
-
-impl<T: 'static> Binding<T> {
-    #[inline]
-    pub fn bind(self, id: impl Into<Id>, queue: &EventQueue) {
-        self.inner.bind(id);
-        self.target.init_subscriber(queue);
-    }
-}
+impl<T, Item: UniqueKey> ReactiveListHandler<Item> for T
+    where
+        T: EventHandler<ListOp<Item>>,
+        T::State: ReactiveListHandlerState<Item> { }
 
 impl<T> ListRef<T> {
     #[inline]
     pub fn as_slice(&self) -> ListSlice<'_, T> {
-        ListSlice(self.0.borrow_mut())
+        ListSlice(self.0.borrow())
     }
 }
 
@@ -149,18 +160,27 @@ impl<'a, T> Deref for ListSlice<'a, T> {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        self.0.as_slice()
+        self.0.items.as_slice()
     }
 }
 
-impl<'a, T> DerefMut for ListSlice<'a, T> {
+impl<'a, T> Deref for ListSliceMut<'a, T> {
+    type Target = [T];
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.0.items.as_slice()
+    }
+}
+
+impl<'a, T> DerefMut for ListSliceMut<'a, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut_slice()
+        self.0.items.as_mut_slice()
     }
 }
 
-impl<T> FromIterator<T> for ReactiveList<T> {
+impl<T: UniqueKey> FromIterator<T> for ReactiveList<T> {
     #[inline]
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let items = Vec::from_iter(iter);
@@ -169,7 +189,7 @@ impl<T> FromIterator<T> for ReactiveList<T> {
     }
 }
 
-impl<T> Clone for ReactiveList<T> {
+impl<T: UniqueKey> Clone for ReactiveList<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -179,16 +199,26 @@ impl<T> Clone for ReactiveList<T> {
     }
 }
 
-impl<T> From<Vec<T>> for ReactiveList<T> {
+impl<T: UniqueKey> From<Vec<T>> for ReactiveList<T> {
     #[inline]
     fn from(items: Vec<T>) -> Self {
         Self::from_vec(items)
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for ReactiveList<T> {
+impl<T: UniqueKey + fmt::Debug> fmt::Debug for ReactiveList<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.items.borrow().as_slice(), f)
+        fmt::Debug::fmt(self.items.borrow().items.as_slice(), f)
     }
 }
+
+impl<T: Hash + Eq> UniqueKey for T { }
+
+impl Hash for DiffEntry {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.key);
+    }
+}
+
+impl IsEnabled for DiffEntry { }

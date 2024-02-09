@@ -23,8 +23,7 @@ use crate::{
         WindowConfig
     },
     window::Window,
-    widget::Element,
-    Ui, Theme, TaskResult
+    Ui, Theme, TaskResult, Context, Id
 };
 
 static WINDOWS: RwLock<Vec<WindowInfo>> = RwLock::new(Vec::new());
@@ -65,10 +64,10 @@ struct WindowInfo {
     surface: Option<WindowSurface>
 }
 
-pub fn run<E: Element>(
+pub fn run(
     mut builder: runtime::Builder,
     window: impl Into<Window>,
-    root: impl FnOnce() -> E + Send + 'static,
+    build_ui: fn(&mut Context) -> Id,
     mut theme: Theme
 ) {
     let conn = Connection::connect_to_env().unwrap();
@@ -79,8 +78,7 @@ pub fn run<E: Element>(
 
     let id = WindowId::new();
     let make_ui = Box::new(move |theme, rt_handle, task_send, client_send| {
-        let root = root();
-        let ui = Ui::new(id, rt_handle, task_send, client_send, theme, root);
+        let ui = Ui::new(id, rt_handle, task_send, client_send, theme, build_ui);
 
         ui
     });

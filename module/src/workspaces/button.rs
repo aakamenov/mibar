@@ -1,6 +1,6 @@
 use mibar_core::{
     widget::{SizeConstraints, Element, Widget},
-    MouseEvent, MouseButton, Size, Rect, Circle, Color, Event,
+    MouseEvent, MouseButton, Size, Rect, Circle, Color, Event, TypedId,
     DrawCtx, LayoutCtx, Context, TextInfo, StateHandle, Id, Task
 };
 
@@ -11,11 +11,15 @@ const TEXT_SIZE: f32 = 12f32;
 
 pub type StyleFn = fn() -> Style;
 
+#[derive(Clone, Copy, Debug)]
+pub struct ButtonId(pub TypedId<Button>);
+
 pub struct Button {
     id: u8,
     style: StyleFn
 }
 
+#[derive(Default)]
 pub struct ButtonWidget;
 
 pub struct State {
@@ -58,13 +62,9 @@ impl Button {
 
 impl Element for Button {
     type Widget = ButtonWidget;
-    type Message = WorkspaceStatus;
 
-    fn make_widget(self, _id: Id, _ctx: &mut Context) -> (
-        Self::Widget,
-        <Self::Widget as Widget>::State
-    ) {
-        let state = State {
+    fn make_state(self, _id: Id, _ctx: &mut Context) -> <Self::Widget as Widget>::State {
+        State {
             id: self.id,
             text: String::from("0"),
             is_active: false,
@@ -72,27 +72,6 @@ impl Element for Button {
             text_dimensions: Size::ZERO,
             status: WorkspaceStatus::default(),
             style: self.style
-        };
-
-        (ButtonWidget, state)
-    }
-
-    fn message(
-        handle: StateHandle<<Self::Widget as Widget>::State>,
-        ctx: &mut Context,
-        msg: Self::Message
-    ) {
-        let state = &mut ctx.tree[handle];
-
-        if msg.is_current != state.status.is_current {
-            state.status.is_current = msg.is_current;
-            ctx.ui.request_redraw();
-        }
-
-        if msg.num_windows != state.status.num_windows {
-            state.status.num_windows = msg.num_windows;
-            state.text = msg.num_windows.to_string();
-            ctx.ui.request_layout();
         }
     }
 }
@@ -231,6 +210,23 @@ impl Widget for ButtonWidget {
                     style.text_color
                 }
             );
+        }
+    }
+}
+
+impl ButtonId {
+    pub fn set_status(self, ctx: &mut Context, new: WorkspaceStatus) {
+        let state = &mut ctx.tree[self.0];
+
+        if new.is_current != state.status.is_current {
+            state.status.is_current = new.is_current;
+            ctx.ui.request_redraw();
+        }
+
+        if new.num_windows != state.status.num_windows {
+            state.status.num_windows = new.num_windows;
+            state.text = new.num_windows.to_string();
+            ctx.ui.request_layout();
         }
     }
 }
