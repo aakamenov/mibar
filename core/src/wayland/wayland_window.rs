@@ -35,11 +35,10 @@ use smithay_client_toolkit::{
     delegate_shm, registry_handlers, delegate_pointer
 };
 use tiny_skia::PixmapMut;
-use tokio::{runtime, sync::mpsc::UnboundedSender};
 
 use crate::{
-    client::{ClientRequest, MakeUiFn, UiRequest},
-    Ui, UiEvent, Event, TaskResult, Point, Size, Theme
+    client::ClientRequest,
+    Ui, UiConfig, UiEvent, Event, TaskResult, Point, Size
 };
 use super::{WindowEvent, MouseEvent, MouseButton, MouseScrollDelta};
 
@@ -100,12 +99,9 @@ pub(crate) struct SurfaceInfo {
 
 impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
     pub fn new(
-        config: W::Config,
+        window_config: W::Config,
+        ui_config: UiConfig,
         client_recv: Channel<ClientRequest>,
-        make_ui: MakeUiFn,
-        theme: Theme,
-        rt_handle: runtime::Handle,
-        ui_send: UnboundedSender<UiRequest>,
         conn: Connection
     ) -> Self {
         let (globals, event_queue) = registry_queue_init(&conn).unwrap();
@@ -146,10 +142,10 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
             }
         }).expect("Couldn't register ui task source with Wayland event loop.");
 
-        let mut ui = make_ui(theme, rt_handle, task_send, ui_send);
+        let mut ui = Ui::new(ui_config, task_send);
         let surface = compositor_state.create_surface(&queue_handle);
 
-        let window = W::init(config, &globals, &queue_handle, surface, &mut ui);
+        let window = W::init(window_config, &globals, &queue_handle, surface, &mut ui);
         ui.ctx.window_id().set_surface(window.window_surface());
 
         Self {

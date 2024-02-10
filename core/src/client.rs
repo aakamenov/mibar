@@ -7,12 +7,12 @@ use std::{
 
 use nohash::{self, IntMap};
 use smithay_client_toolkit::reexports::{
-    calloop::channel::{Sender, channel},
+    calloop::channel::channel as calloop_channel,
     client::Connection
 };
 use tokio::{
     runtime,
-    sync::mpsc::{UnboundedSender, unbounded_channel}
+    sync::mpsc::unbounded_channel as tokio_unbounded_channel
 };
 
 use crate::{
@@ -23,18 +23,10 @@ use crate::{
         WindowConfig
     },
     window::Window,
-    Ui, Theme, TaskResult, Context, Id
+    Theme, UiConfig, Context, Id
 };
 
 static WINDOWS: RwLock<Vec<WindowInfo>> = RwLock::new(Vec::new());
-
-pub(crate) type MakeUiFn = 
-    Box<dyn FnOnce(
-        Theme,
-        runtime::Handle,
-        Sender<TaskResult>,
-        UnboundedSender<UiRequest>
-    ) -> Ui + Send>;
 
 #[derive(Clone, Copy, PartialOrd, Eq, PartialEq, Debug)]
 pub struct WindowId(u64);
@@ -47,7 +39,7 @@ pub(crate) struct UiRequest {
 pub(crate) enum WindowAction {
     Open {
         config: WindowConfig,
-        make_ui: MakeUiFn
+        build_ui: fn(&mut Context) -> Id
     },
     Close,
     ThemeChanged(Theme)
@@ -74,60 +66,51 @@ pub fn run(
     let runtime = builder.build().unwrap();
 
     let mut windows = IntMap::default();
-    let (ui_send, mut ui_recv) = unbounded_channel::<UiRequest>();
-
-    let id = WindowId::new();
-    let make_ui = Box::new(move |theme, rt_handle, task_send, client_send| {
-        let ui = Ui::new(id, rt_handle, task_send, client_send, theme, build_ui);
-
-        ui
-    });
+    let (ui_send, mut ui_recv) = tokio_unbounded_channel::<UiRequest>();
 
     ui_send.send(UiRequest {
-        id,
+        id: WindowId::new(),
         action: WindowAction::Open {
+            build_ui,
             config: match window.into() {
                 Window::Bar(bar) => WindowConfig::LayerShell(bar.into()),
                 Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
                 Window::Popup(_) => panic!("Initial window cannot be a popup.")
-            },
-            make_ui
+            }
         }
     }).unwrap();
 
     runtime.block_on(async {
         while let Some(request) = ui_recv.recv().await {
             match request.action {
-                WindowAction::Open { config, make_ui } => {
-                    let (client_send, client_recv) = channel::<ClientRequest>();
+                WindowAction::Open { config, build_ui } => {
+                    let (client_send, client_recv) = calloop_channel::<ClientRequest>();
                     windows.insert(request.id, client_send);
 
-                    let rt_handle = runtime.handle().clone();
-                    let ui_send = ui_send.clone();
-                    let theme = theme.clone();
                     let conn = conn.clone();
+                    let ui_config = UiConfig {
+                        window_id: request.id,
+                        theme: theme.clone(),
+                        build_ui,
+                        rt_handle: runtime.handle().clone(),
+                        client_send: ui_send.clone()
+                    };
 
                     thread::spawn(move || {
                         match config {
                             WindowConfig::LayerShell(bar) => {
                                 WaylandWindowBase::<LayerShellWindowState>::new(
                                     bar.into(),
+                                    ui_config,
                                     client_recv,
-                                    make_ui,
-                                    theme,
-                                    rt_handle,
-                                    ui_send,
                                     conn
                                 ).run();
                             }
                             WindowConfig::Popup(popup) => {
                                 WaylandWindowBase::<PopupWindowState>::new(
                                     popup,
+                                    ui_config,
                                     client_recv,
-                                    make_ui,
-                                    theme,
-                                    rt_handle,
-                                    ui_send,
                                     conn
                                 ).run();
                             }

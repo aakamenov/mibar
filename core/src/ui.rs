@@ -107,14 +107,24 @@ pub(crate) struct Ui {
     size: Size
 }
 
+pub(crate) struct UiConfig {
+    pub window_id: WindowId,
+    pub theme: Theme,
+    pub build_ui: fn(&mut Context) -> Id,
+    pub rt_handle: runtime::Handle,
+    pub client_send: UnboundedSender<UiRequest>
+}
+
 impl Ui {
     pub fn new(
-        window_id: WindowId,
-        rt_handle: runtime::Handle,
-        task_send: Sender<TaskResult>,
-        client_send: UnboundedSender<UiRequest>,
-        theme: Theme,
-        build_ui: fn(&mut Context) -> Id
+        UiConfig {
+            window_id,
+            theme,
+            build_ui,
+            rt_handle,
+            client_send
+        }: UiConfig,
+        task_send: Sender<TaskResult>
     ) -> Self {
         let mut renderer = Renderer::new();
         let mut tree = WidgetTree::new();
@@ -466,10 +476,6 @@ impl<'a> Context<'a> {
         build_ui: fn(&mut Context) -> Id
     ) -> WindowId {
         let id = WindowId::new();
-        let make_ui = Box::new(move |theme, rt_handle, task_send, client_send| {
-            Ui::new(id, rt_handle, task_send, client_send, theme, build_ui)
-        });
-
         let config = match window.into() {
             Window::Bar(bar) => WindowConfig::LayerShell(bar.into()),
             Window::SidePanel(panel) => WindowConfig::LayerShell(panel.into()),
@@ -503,7 +509,7 @@ impl<'a> Context<'a> {
             id,
             action: WindowAction::Open {
                 config,
-                make_ui
+                build_ui
             }
         }).unwrap();
 
