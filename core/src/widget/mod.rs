@@ -5,16 +5,18 @@ pub mod image;
 pub mod container;
 pub mod state;
 mod layout;
+mod element_tuple;
 
 use std::rc::Rc;
 
 pub use layout::*; 
-pub use flex::{Flex, StaticFlexBuilder};
+pub use flex::Flex;
 pub use text::Text;
 pub use button::{Button, ButtonState};
 pub use image::Image;
 pub use container::Container;
 pub use state::{AppState, State};
+pub use element_tuple::FlexElementTuple;
 
 use std::any::{Any, type_name};
 

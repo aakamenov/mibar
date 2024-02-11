@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::Deref};
+use std::{rc::Rc, marker::PhantomData, ops::Deref};
 
 use smallvec::SmallVec;
 
@@ -12,12 +12,12 @@ use crate::{
     DrawCtx, LayoutCtx, Context, Event, Id, TypedId, StateHandle
 };
 use super::{
-    SizeConstraints, Padding,
+    SizeConstraints, Padding, FlexElementTuple,
     Alignment, Axis, Element, Widget
 };
 
 pub type StyleFn = fn() -> QuadStyle;
-pub type CreateChildFn<T> = fn(DynamicFlexBuilder, &T) -> (Id, f32);
+pub type CreateChildFn<T> = dyn Fn(DynamicFlexBuilder, &T) -> (Id, f32);
 
 pub struct Flex {
     axis: Axis,
@@ -28,20 +28,14 @@ pub struct Flex {
     style: Option<StyleFn>
 }
 
-pub struct StaticFlex<F: FnOnce(&mut StaticFlexBuilder)> {
-    build: F,
+pub struct StaticFlex<T: FlexElementTuple> {
+    children: T,
     params: Flex
 }
 
 pub struct DynamicFlex<T: UniqueKey> {
-    create: CreateChildFn<T>,
+    create: Rc<CreateChildFn<T>>,
     params: Flex
-}
-
-pub struct StaticFlexBuilder<'a: 'b, 'b> {
-    id: Id,
-    ctx: &'b mut Context<'a>,
-    children: &'b mut SmallVec<[(Id, f32); 8]>
 }
 
 pub struct DynamicFlexBuilder<'a: 'b, 'b> {
@@ -53,7 +47,6 @@ pub struct FlexWidget<T> {
     data: PhantomData<T>
 }
 
-#[derive(Clone)]
 pub struct State<T> {
     children: SmallVec<[(Id, f32); 8]>,
     axis: Axis,
@@ -62,7 +55,7 @@ pub struct State<T> {
     spacing: f32,
     padding: Padding,
     style: Option<StyleFn>,
-    create_child: CreateChildFn<T> 
+    create_child: Rc<CreateChildFn<T>>
 }
 
 impl Flex {
@@ -89,8 +82,8 @@ impl Flex {
     }
 
     #[inline]
-    pub fn build<F: FnOnce(&mut StaticFlexBuilder) + 'static>(self, build: F) -> StaticFlex<F> {
-        StaticFlex { build, params: self }
+    pub fn build<T: FlexElementTuple>(self, children: T) -> StaticFlex<T> {
+        StaticFlex { children, params: self }
     }
 
     #[inline]
@@ -98,9 +91,9 @@ impl Flex {
         self,
         ctx: &mut Context,
         list: &ReactiveList<T>,
-        create: CreateChildFn<T>
+        create: impl Fn(DynamicFlexBuilder, &T) -> (Id, f32) + 'static
     ) -> TypedId<DynamicFlex<T>> {
-        let id = DynamicFlex { create, params: self }.make(ctx);
+        let id = DynamicFlex { create: Rc::new(create), params: self }.make(ctx);
         list.subscribe(ctx, id);
 
         id
@@ -142,36 +135,6 @@ impl Flex {
     }
 }
 
-impl<'a: 'b, 'b> StaticFlexBuilder<'a, 'b> {
-    #[inline]
-    pub fn non_flex(
-        &mut self,
-        child: impl Element
-    ) {
-        self.flex(child, 0f32);
-    }
-
-    #[inline]
-    pub fn flex(
-        &mut self,
-        child: impl Element,
-        flex: f32
-    ) {
-        let id = self.ctx.new_child(self.id, child);
-        self.children.push((id.into(), flex));
-    }
-
-    #[inline]
-    pub fn reserve(&mut self, additional: usize) {
-        self.children.reserve(additional);
-    }
-
-    #[inline]
-    pub fn reserve_exact(&mut self, additional: usize) {
-        self.children.reserve_exact(additional);
-    }
-}
-
 impl<'a: 'b, 'b> DynamicFlexBuilder<'a, 'b> {
     #[inline]
     pub fn non_flex(self, child: impl Element) -> (Id, f32) {
@@ -186,18 +149,12 @@ impl<'a: 'b, 'b> DynamicFlexBuilder<'a, 'b> {
     }
 }
 
-impl<F: FnOnce(&mut StaticFlexBuilder)> Element for StaticFlex<F> {
+impl<T: FlexElementTuple> Element for StaticFlex<T> {
     type Widget = FlexWidget<()>;
 
-    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State{
+    fn make_state(self, id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         let mut children = SmallVec::new();
-        let mut builder = StaticFlexBuilder {
-            id,
-            ctx,
-            children: &mut children
-        };
-
-        (self.build)(&mut builder);
+        self.children.make(ctx, id, &mut children);
 
         State {
             children,
@@ -207,7 +164,7 @@ impl<F: FnOnce(&mut StaticFlexBuilder)> Element for StaticFlex<F> {
             spacing: self.params.spacing,
             padding: self.params.padding,
             style: self.params.style,
-            create_child: |_, _| { unreachable!() }
+            create_child: Rc::new(|_, _| { unreachable!() })
         }
     }
 }
@@ -402,7 +359,7 @@ impl<T: UniqueKey + 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
             ListOp::Init(items) => {
                 let id = handle.id();
                 let state = &mut ctx.tree[handle];
-                let create_child = state.create_child;
+                let create_child = Rc::clone(&state.create_child);
 
                 state.children.reserve(items.as_slice().len());
 

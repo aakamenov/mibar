@@ -100,33 +100,34 @@ fn theme() -> Theme {
 fn build(ctx: &mut Context) -> Id {
     AppState::new(|_| BarState { power_menu: None }, |_, handle| {
         Flex::row()
-            .spacing(SPACING)
-            .padding(PADDING)
-            .style(|| QuadStyle::solid_background(BASE))
-            .build(move |builder| {
-                let left = Flex::row()
-                    .spacing(SPACING)
-                    .build(|builder| {
-                        builder.non_flex(Workspaces::new(workspaces_style));
-                        builder.non_flex(DateTime::new());
-                    });
-
-                builder.flex(left, 1f32);
-
-                let right = Flex::row()
-                    .main_alignment(Alignment::End)
-                    .spacing(SPACING)
-                    .build(move |builder| {
-                        builder.non_flex(KeyboardLayout::new(KEYBOARD_DEVICE));
-                        builder.non_flex(PulseAudioVolume::new(format_audio));
-                        builder.non_flex(Battery::new(BATTERY_DEVICE, Duration::from_secs(30), battery_style));
-                        builder.non_flex(Cpu::new());
-                        builder.non_flex(Ram::new());
-                        builder.non_flex(boot_menu_button(handle));
-                    });
-
-                builder.flex(right, 1f32);
-            })
+        .spacing(SPACING)
+        .padding(PADDING)
+        .style(|| QuadStyle::solid_background(BASE))
+        .build((
+            (
+                Flex::row()
+                .spacing(SPACING)
+                .build((
+                    (Workspaces::new(workspaces_style), 0f32),
+                    (DateTime::new(), 0f32)
+                )),
+                1f32
+            ),
+            (
+                Flex::row()
+                .main_alignment(Alignment::End)
+                .spacing(SPACING)
+                .build((
+                    (KeyboardLayout::new(KEYBOARD_DEVICE), 0f32),
+                    (PulseAudioVolume::new(format_audio), 0f32),
+                    (Battery::new(BATTERY_DEVICE, Duration::from_secs(30), battery_style), 0f32),
+                    (Cpu::new(), 0f32),
+                    (Ram::new(), 0f32),
+                    (boot_menu_button(handle), 0f32)
+                )),
+                1f32
+            )
+        ))
     })
     .make(ctx)
     .into()
@@ -183,43 +184,48 @@ fn boot_menu_panel(ctx: &mut Context) -> Id {
         }
     }
 
+    const ICON_SIZE: f32 = 24f32;
+
     Flex::row()
     .spacing(SPACING)
     .padding(PADDING)
     .style(|| QuadStyle::solid_background(BASE).with_border(1f32, OUTLINE))
-    .build(|builder| {
-        const ICON_SIZE: f32 = 24f32;
+    .build((
+        (
+            {
+                let col = Flex::column().build((
+                    (Text::new("⏻").font(font_mono()).text_size(ICON_SIZE), 0f32),
+                    (Text::new("Shutdown").font(font_mono()), 0f32)
+                ));
 
-        builder.non_flex({
-            let col = Flex::column().build(|builder| {
-                builder.non_flex(Text::new("⏻").font(font_mono()).text_size(ICON_SIZE));
-                builder.non_flex(Text::new("Shutdown").font(font_mono()));
-            });
+                Button::with_child(col, |_| {
+                    if let Err(err) = Command::new("shutdown").arg("-h").arg("now").spawn() {
+                        eprintln!("Failed to execute shutdown command: {err}");
+                    }
+                })
+                .padding(0f32)
+                .style(|state| button_style(state, PRIMARY_RED))
+            },
+            0f32
+        ),
+        (
+            {
+                let col = Flex::column().build((
+                    (Text::new("󰜉").font(font_mono()).text_size(ICON_SIZE), 0f32),
+                    (Text::new("Reboot").font(font_mono()), 0f32)
+                ));
 
-            Button::with_child(col, |_| {
-                if let Err(err) = Command::new("shutdown").arg("-h").arg("now").spawn() {
-                    eprintln!("Failed to execute shutdown command: {err}");
-                }
-            })
-            .padding(0f32)
-            .style(|state| button_style(state, PRIMARY_RED))
-        });
-
-        builder.non_flex({
-            let col = Flex::column().build(|builder| {
-                builder.non_flex(Text::new("󰜉").font(font_mono()).text_size(ICON_SIZE));
-                builder.non_flex(Text::new("Reboot").font(font_mono()));
-            });
-
-            Button::with_child(col, |_| {
-                if let Err(err) = Command::new("reboot").spawn() {
-                    eprintln!("Failed to execute reboot command: {err}");
-                }
-            })
-            .padding(0f32)
-            .style(|state| button_style(state, PRIMARY_ORANGE))
-        });
-    })
+                Button::with_child(col, |_| {
+                    if let Err(err) = Command::new("reboot").spawn() {
+                        eprintln!("Failed to execute reboot command: {err}");
+                    }
+                })
+                .padding(0f32)
+                .style(|state| button_style(state, PRIMARY_ORANGE))
+            },
+            0f32
+        )
+    ))
     .make(ctx)
     .into()
 }
