@@ -48,7 +48,7 @@ pub struct TypedId<T: Element> {
     data: PhantomData<T>
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Default, Debug)]
 pub struct Id(pub(crate) RawWidgetId);
 
 pub struct Context<'a> {
@@ -545,11 +545,13 @@ impl<'a> Context<'a> {
             match event {
                 EventType::Action(action) => {
                     // Safety: we only call this function once, this will also invoke the drop code
-                    // and the memory will be released by the allocator at the end of this method.
+                    // and the memory will be released by the allocator at the end of the interaction.
                     unsafe { action.invoke(self); }
                     events.extend(self.event_queue.buffer.borrow_mut().drain(..).rev());
                 }
-                EventType::Destroy(id) => self.destroy_child(id)
+                EventType::Destroy(ids) => for id in ids {
+                    self.destroy_child(id)
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 use std::{cell::RefCell, ptr};
 
 use bumpalo::Bump;
+use smallvec::SmallVec;
 
 use crate::{Context, Id};
 
@@ -15,7 +16,7 @@ pub struct EventQueue<'a> {
 
 pub(crate) enum EventType<'a> {
     Action(&'a dyn BumpAllocatedAction),
-    Destroy(Id)
+    Destroy(SmallVec<[Id; 1]>)
 }
 
 /// This trait wraps the FnOnce actions we allocate with bumpalo because it
@@ -43,7 +44,14 @@ impl<'a> EventQueue<'a> {
 
     #[inline]
     pub fn destroy(&self, id: Id) {
-        self.buffer.borrow_mut().push(EventType::Destroy(id));
+        self.destroy_many([id]);
+    }
+
+    #[inline]
+    pub fn destroy_many(&self, ids: impl IntoIterator<Item = Id>) {
+        self.buffer.borrow_mut().push(
+            EventType::Destroy(SmallVec::from_iter(ids))
+        );
     }
 }
 

@@ -1,14 +1,14 @@
 use smallvec::SmallVec;
 
 use crate::{Context, Id};
-use super::Element;
+use super::{flex::FlexChild, Element};
 
 pub trait FlexElementTuple {
     fn make(
         self,
         ctx: &mut Context,
         parent: Id,
-        children: &mut SmallVec<[(Id, f32); 8]>
+        children: &mut SmallVec<[FlexChild; 8]>
     );
 }
 
@@ -19,9 +19,14 @@ macro_rules! flex_tuple {
                 self,
                 ctx: &mut Context,
                 parent: Id,
-                children: &mut SmallVec<[(Id, f32); 8]>
+                children: &mut SmallVec<[FlexChild; 8]>
             ) {
-                $( children.push((ctx.new_child(parent, self.$n.0).into(), self.$n.1)); )*
+                $(
+                    children.push(FlexChild {
+                        id: ctx.new_child(parent, self.$n.0).into(),
+                        flex: self.$n.1
+                    });
+                )*
             }
         }   
     };
@@ -29,8 +34,11 @@ macro_rules! flex_tuple {
 
 impl<T0: Element> FlexElementTuple for (T0, f32) {
     fn make(self, ctx: &mut Context, parent: Id,
-        children: &mut SmallVec<[(Id, f32); 8]>) {
-        children.push((ctx.new_child(parent, self.0).into(), self.1));
+        children: &mut SmallVec<[FlexChild; 8]>) {
+        children.push(FlexChild {
+            id: ctx.new_child(parent, self.0).into(),
+            flex: self.1
+        });
     }
 }
 

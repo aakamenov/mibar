@@ -3,24 +3,37 @@ use std::{
     ops::{Deref, DerefMut},
     hash::{Hash, Hasher},
     rc::Rc,
-    fmt
+    fmt,
+    mem
 };
 
 use ahash::AHasher;
+use smallvec::SmallVec;
 use nohash::{IntSet, IsEnabled};
 
-use crate::{widget::Element, TypedId, Context};
+use crate::{widget::Element, TypedId, Context, Id, StateHandle};
 use super::event_emitter::{EventEmitter, EventHandler};
 
 pub trait ReactiveListHandler<T: UniqueKey>: EventHandler<ListOp<T>>
-    where Self::State: ReactiveListHandlerState<T>
+    where Self::State: ReactiveListHandlerState
 { }
 
-pub trait ReactiveListHandlerState<T: UniqueKey> {
-    fn add(&mut self, ctx: &mut Context, item: &T);
+pub trait ReactiveListHandlerState {
+    type Item: ContainsId;
+
+    fn child_ids(&mut self) -> &mut SmallVec<[Self::Item; 8]>;
 }
 
-pub trait UniqueKey: Hash + Eq { }
+pub trait ContainsId: Default {
+    fn id(&self) -> Id;
+    fn set_id(&mut self, id: Id);
+}
+
+pub trait UniqueKey {
+    type Key: Hash;
+
+    fn key(&self) -> &Self::Key;
+}
 
 pub struct ReactiveList<T: UniqueKey> {
     items: Rc<RefCell<State<T>>>,
@@ -29,12 +42,12 @@ pub struct ReactiveList<T: UniqueKey> {
 
 pub enum ListOp<T: UniqueKey> {
     Init(ListRef<T>),
-    Changes(ListDiff<T>)
+    Diff(ListDiff<T>)
 }
 
-pub struct ListDiff<T: UniqueKey> {
-    state: Rc<RefCell<State<T>>>,
-    diff: Vec<DiffEntry>
+pub struct NewItems<'a, T: UniqueKey> {
+    pub list: ListRef<T>,
+    pub new_indexes: &'a SmallVec<[usize; 8]>
 }
 
 pub struct ListSlice<'a, T>(Ref<'a, State<T>>);
@@ -42,15 +55,34 @@ pub struct ListSliceMut<'a, T>(RefMut<'a, State<T>>);
 
 pub struct ListRef<T>(Rc<RefCell<State<T>>>);
 
-struct State<T> {
-    items: Vec<T>,
-    items_hashed: IntSet<DiffEntry>
+pub struct ListDiff<T: UniqueKey> {
+    list: ListRef<T>,
+    diff: Diff
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Debug, Default)]
+struct Diff {
+    clear: bool,
+    added: SmallVec<[usize; 8]>,
+    removed: SmallVec<[usize; 8]>,
+    moved: SmallVec<[DiffMove; 8]>
+}
+    
+#[derive(Clone, Copy, Debug)]
+struct DiffMove {
+    from: usize,
+    to: usize
+}
+
+#[derive(Clone, Copy, Debug)]
 struct DiffEntry {
     index: usize,
     key: u64
+}
+
+struct State<T> {
+    items: Vec<T>,
+    items_hashed: IntSet<DiffEntry>
 }
 
 impl<T: UniqueKey> ReactiveList<T> {
@@ -81,9 +113,14 @@ impl<T: UniqueKey> ReactiveList<T> {
         self.emitter.subscribe(id);
 
         let subscriber = self.emitter.last_added().unwrap();
-        let op = ListOp::Init(ListRef(self.items.clone()));
+        let op = ListOp::Init(ListRef(Rc::clone(&self.items)));
 
         subscriber.call(ctx, &op);
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.as_slice().len()
     }
 
     #[inline]
@@ -101,10 +138,12 @@ impl<T: UniqueKey> ReactiveList<T> {
         f(&mut state.items);
 
         let diff = state.compute_diff();
-        let event = ListOp::Changes(ListDiff {
-            state: self.items.clone(),
+        let event = ListOp::Diff(ListDiff {
+            list: ListRef(Rc::clone(&self.items)),
             diff
         });
+
+        drop(state);
 
         self.emitter.emit(ctx, &event);
     }
@@ -122,12 +161,21 @@ impl<T: UniqueKey> State<T> {
         state
     }
 
-    fn compute_diff(&mut self) -> Vec<DiffEntry> {
+    fn compute_diff(&mut self) -> Diff {
+        if self.items.is_empty() {
+            self.items_hashed.clear();
+
+            return Diff {
+                clear: true,
+                ..Default::default()
+            };
+        }
+
         let new = self.items.iter()
             .enumerate()
             .map(|(index, x)| {
                 let mut hasher = AHasher::default();
-                x.hash(&mut hasher);
+                x.key().hash(&mut hasher);
 
                 DiffEntry {
                     index,
@@ -136,22 +184,136 @@ impl<T: UniqueKey> State<T> {
             })
             .collect::<IntSet<DiffEntry>>();
 
-        let diff = new.difference(&self.items_hashed).copied().collect();
+        let removed = self.items_hashed.difference(&new)
+            .map(|x| x.index)
+            .collect::<SmallVec<[usize; 8]>>();
+
+        let mut added = SmallVec::new();
+        let mut moved = SmallVec::new();
+
+        for item in &new {
+            if let Some(old) = self.items_hashed.get(item) {
+                if old.index != item.index {
+                    moved.push(DiffMove {
+                        from: old.index,
+                        to: item.index
+                    });
+                }
+            } else {
+                added.push(item.index);
+            }
+        }
+
         self.items_hashed = new;
 
-        diff
+        Diff {
+            clear: false,
+            added,
+            removed,
+            moved
+        }
+    }
+}
+
+impl<T: UniqueKey> ListDiff<T> {
+    #[must_use = "Use the returned value to generate widgets for any new items."]
+    pub fn apply<S: ReactiveListHandlerState + 'static>(
+        &self,
+        ctx: &mut Context,
+        handle: StateHandle<S>
+    ) -> NewItems<T> {
+        #[derive(Debug)]
+        struct MoveOp {
+            id: Id,
+            to: usize
+        }
+
+        let Self { list, diff } = self;
+
+        let items = ctx.tree[handle].child_ids();
+
+        if diff.clear {
+            ctx.event_queue.destroy_many(
+                items.drain(..).map(|x| x.id())
+            );
+
+            return NewItems {
+                list: self.list.clone(),
+                new_indexes: &diff.added
+            };
+        }
+
+        // Order is important here:
+        // 1. Remove
+        // 2. Move
+        // 3. Add (performed by the user using the returned NewItems value)
+
+        ctx.event_queue.destroy_many(
+            diff.removed.iter().map(|i| items[*i].id())
+        );
+
+        let new_len = list.as_slice().len();
+        if new_len > items.len() {
+            items.resize_with(new_len, Default::default);
+        }
+
+        // We can't just directly perform moves on the original items Vec
+        // as we might incorrectly overwrite some entries. Consider the scenario
+        // where we move from list [A, B] to [B, A]. We'd end up with two move ops
+        // that will ultimately cancel eachother when applied.
+        let mut move_ops = SmallVec::<[MoveOp; 16]>::new();
+
+        for op in &diff.moved {
+            move_ops.push(MoveOp {
+                id: mem::take(&mut items[op.from]).id(),
+                to: op.to
+            });
+        }
+
+        for op in move_ops {
+            items[op.to].set_id(op.id);
+        }
+
+        if new_len < items.len() {
+            // At this point we've destroyed all of the removed widgets so we can safely truncate. 
+            items.truncate(new_len);
+        }
+
+        NewItems {
+            list: self.list.clone(),
+            new_indexes: &diff.added
+        }
+    }
+}
+
+impl ContainsId for Id {
+    #[inline]
+    fn id(&self) -> Id {
+        *self
+    }
+
+    #[inline]
+    fn set_id(&mut self, id: Id) {
+        *self = id;
     }
 }
 
 impl<T, Item: UniqueKey> ReactiveListHandler<Item> for T
     where
         T: EventHandler<ListOp<Item>>,
-        T::State: ReactiveListHandlerState<Item> { }
+        T::State: ReactiveListHandlerState { }
 
 impl<T> ListRef<T> {
     #[inline]
     pub fn as_slice(&self) -> ListSlice<'_, T> {
         ListSlice(self.0.borrow())
+    }
+}
+
+impl<T: UniqueKey> Clone for ListRef<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self(Rc::clone(&self.0))
     }
 }
 
@@ -213,7 +375,14 @@ impl<T: UniqueKey + fmt::Debug> fmt::Debug for ReactiveList<T> {
     }
 }
 
-impl<T: Hash + Eq> UniqueKey for T { }
+impl PartialEq for DiffEntry {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for DiffEntry { }
 
 impl Hash for DiffEntry {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -221,4 +390,31 @@ impl Hash for DiffEntry {
     }
 }
 
+// We manually implement Hash above which writes only the u64 key value.
 impl IsEnabled for DiffEntry { }
+
+macro_rules! impl_unique_key {
+    ($t:ty) => {
+        impl UniqueKey for $t {
+            type Key = Self;
+
+            #[inline]
+            fn key(&self) -> &Self::Key {
+                self
+            }
+        }       
+    };
+}
+
+impl_unique_key!(u8);
+impl_unique_key!(u16);
+impl_unique_key!(u32);
+impl_unique_key!(u64);
+impl_unique_key!(u128);
+impl_unique_key!(i8);
+impl_unique_key!(i16);
+impl_unique_key!(i32);
+impl_unique_key!(i64);
+impl_unique_key!(i128);
+impl_unique_key!(&str);
+impl_unique_key!(String);

@@ -2,7 +2,7 @@ use std::{time::Duration, process::Command};
 
 use mibar::{
     tokio,
-    modules::{
+    module::{
         workspaces::{self, Workspaces},
         date_time::DateTime,
         battery::{self, Battery},

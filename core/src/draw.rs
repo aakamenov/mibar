@@ -106,12 +106,22 @@ impl Quad {
 
 impl QuadStyle {
     #[inline]
-    pub fn solid_background(background: Color) -> Self {
+    pub fn solid_background(background: impl Into<Background>) -> Self {
         Self {
-            background: Background::Color(background),
+            background: background.into(),
             border_radius: 0f32.into(),
             border_width: 0f32,
             border_color: Background::Color(Color::TRANSPARENT)
+        }
+    }
+
+    #[inline]
+    pub fn bordered(border_color: impl Into<Background>, border_width: f32) -> Self {
+        Self {
+            background: Background::Color(Color::TRANSPARENT),
+            border_radius: 0f32.into(),
+            border_width,
+            border_color: border_color.into()
         }
     }
 

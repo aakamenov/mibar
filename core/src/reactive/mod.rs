@@ -4,4 +4,4 @@ mod action;
 
 pub use action::*;
 pub use event_emitter::EventEmitter;
-pub use reactive_list::ReactiveList;
+pub use reactive_list::{ReactiveList, UniqueKey};

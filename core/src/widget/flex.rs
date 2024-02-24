@@ -6,7 +6,7 @@ use crate::{
     geometry::{Size, Rect},
     draw::{Quad, QuadStyle},
     reactive::{
-        reactive_list::{ReactiveList, UniqueKey, ListOp},
+        reactive_list::{ReactiveList, ReactiveListHandlerState, ContainsId, UniqueKey, ListOp},
         event_emitter::EventHandler
     },
     DrawCtx, LayoutCtx, Context, Event, Id, TypedId, StateHandle
@@ -17,7 +17,7 @@ use super::{
 };
 
 pub type StyleFn = fn() -> QuadStyle;
-pub type CreateChildFn<T> = dyn Fn(DynamicFlexBuilder, &T) -> (Id, f32);
+pub type CreateChildFn<T> = dyn Fn(DynamicFlexBuilder, &T) -> FlexChild;
 
 pub struct Flex {
     axis: Axis,
@@ -39,8 +39,8 @@ pub struct DynamicFlex<T: UniqueKey> {
 }
 
 pub struct DynamicFlexBuilder<'a: 'b, 'b> {
+    pub ctx: &'b mut Context<'a>,
     id: Id,
-    ctx: &'b mut Context<'a>
 }
 
 pub struct FlexWidget<T> {
@@ -48,7 +48,7 @@ pub struct FlexWidget<T> {
 }
 
 pub struct State<T> {
-    children: SmallVec<[(Id, f32); 8]>,
+    children: SmallVec<[FlexChild; 8]>,
     axis: Axis,
     main_alignment: Alignment,
     cross_alignment: Alignment,
@@ -56,6 +56,12 @@ pub struct State<T> {
     padding: Padding,
     style: Option<StyleFn>,
     create_child: Rc<CreateChildFn<T>>
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct FlexChild {
+    pub id: Id,
+    pub flex: f32
 }
 
 impl Flex {
@@ -91,7 +97,7 @@ impl Flex {
         self,
         ctx: &mut Context,
         list: &ReactiveList<T>,
-        create: impl Fn(DynamicFlexBuilder, &T) -> (Id, f32) + 'static
+        create: impl Fn(DynamicFlexBuilder, &T) -> FlexChild + 'static
     ) -> TypedId<DynamicFlex<T>> {
         let id = DynamicFlex { create: Rc::new(create), params: self }.make(ctx);
         list.subscribe(ctx, id);
@@ -137,15 +143,18 @@ impl Flex {
 
 impl<'a: 'b, 'b> DynamicFlexBuilder<'a, 'b> {
     #[inline]
-    pub fn non_flex(self, child: impl Element) -> (Id, f32) {
+    pub fn non_flex(self, child: impl Element) -> FlexChild {
         self.flex(child, 0f32)
     }
 
     #[inline]
-    pub fn flex(self, child: impl Element, flex: f32) -> (Id, f32) {
+    pub fn flex(self, child: impl Element, flex: f32) -> FlexChild {
         let id = self.ctx.new_child(self.id, child);
 
-        (id.into(), flex)
+        FlexChild {
+            id: id.into(),
+            flex
+        }
     }
 }
 
@@ -213,7 +222,7 @@ impl<T: 'static> Widget for FlexWidget<T> {
 
         // Layout non-flex children first i.e those with flex factor == 0
         for i in 0..children_len {
-            let (child, flex) = ctx.tree[handle].children[i];
+            let FlexChild { id, flex } = ctx.tree[handle].children[i];
             total_flex += flex;
 
             if flex.abs() > 0f32 {
@@ -226,7 +235,7 @@ impl<T: 'static> Widget for FlexWidget<T> {
                 Size::new(width, height)
             );
 
-            let size = ctx.layout(child, widget_bounds);
+            let size = ctx.layout(id, widget_bounds);
 
             let main_cross = axis.main_and_cross_size(size);
             available -= main_cross.0;
@@ -239,7 +248,7 @@ impl<T: 'static> Widget for FlexWidget<T> {
 
             // Layout flex children i.e those with flex factor > 0
             for i in 0..children_len {
-                let (child, flex) = ctx.tree[handle].children[i];
+                let FlexChild { id, flex } = ctx.tree[handle].children[i];
 
                 if flex <= 0f32 {
                     continue;
@@ -267,7 +276,7 @@ impl<T: 'static> Widget for FlexWidget<T> {
                     Size::new(max_width, max_height)
                 );
 
-                let size = ctx.layout(child, widget_bounds);
+                let size = ctx.layout(id, widget_bounds);
 
                 let main_cross = axis.main_and_cross_size(size);
                 total_main += main_cross.0;
@@ -295,7 +304,7 @@ impl<T: 'static> Widget for FlexWidget<T> {
 
         // Position children
         for i in 0..children_len {
-            let child = ctx.tree[handle].children[i].0;
+            let child = ctx.tree[handle].children[i].id;
 
             if i > 0 {
                 main += per_item_spacing;
@@ -336,7 +345,7 @@ impl<T: 'static> Widget for FlexWidget<T> {
         }
 
         for i in 0..children_len {
-            ctx.draw(ctx.tree[handle].children[i].0);
+            ctx.draw(ctx.tree[handle].children[i].id);
         }
     }
 
@@ -344,7 +353,7 @@ impl<T: 'static> Widget for FlexWidget<T> {
         let children_len = ctx.tree[handle].children.len();
 
         for i in 0..children_len {
-            ctx.event(ctx.tree[handle].children[i].0, event);
+            ctx.event(ctx.tree[handle].children[i].id, event);
         }
     }
 }
@@ -368,8 +377,61 @@ impl<T: UniqueKey + 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
                     ctx.tree[handle].children.push(result);
                 }
             }
-            ListOp::Changes(_) => { }
+            ListOp::Diff(diff) => {
+                //println!("Before: {:?}", &ctx.tree[handle].children);
+                let new = diff.apply(ctx, handle);
+                let items = new.list.as_slice(); 
+                let create_child = Rc::clone(&ctx.tree[handle].create_child);
+                let id = handle.id();
+
+                for index in new.new_indexes {
+                    let index = *index;
+
+                    let item = &items[index];
+                    let result = create_child(DynamicFlexBuilder { id, ctx }, item);
+
+                    ctx.tree[handle].children[index] = result;
+                }
+
+                //println!("After:  {:?}\n", &ctx.tree[handle].children);
+            }
         }
+    }
+}
+
+impl<T> ReactiveListHandlerState for State<T> {
+    type Item = FlexChild;
+
+    fn child_ids(&mut self) -> &mut SmallVec<[Self::Item; 8]> {
+        &mut self.children
+    }
+}
+
+impl ContainsId for FlexChild {
+    #[inline]
+    fn id(&self) -> Id {
+        self.id
+    }
+
+    #[inline]
+    fn set_id(&mut self, id: Id) {
+        self.id = id;
+    }
+}
+
+impl<T: UniqueKey + 'static> TypedId<DynamicFlex<T>> {
+    #[inline]
+    pub fn set_style(self, ctx: &mut Context, style: StyleFn) {
+        ctx.tree[self].style = Some(style);
+        ctx.ui.request_redraw();
+    }
+}
+
+impl<T: FlexElementTuple> TypedId<StaticFlex<T>> {
+    #[inline]
+    pub fn set_style(self, ctx: &mut Context, style: StyleFn) {
+        ctx.tree[self].style = Some(style);
+        ctx.ui.request_redraw();
     }
 }
 
