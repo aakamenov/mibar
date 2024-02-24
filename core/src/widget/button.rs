@@ -222,6 +222,12 @@ impl<T: Element + 'static> TypedId<Button<T>> {
     pub fn child(self, ctx: &mut Context) -> TypedId<T> {
         ctx.tree[self].child
     }
+
+    #[inline]
+    pub fn set_style(self, ctx: &mut Context, style: StyleFn) {
+        ctx.tree[self].style = Some(style);
+        ctx.ui.request_redraw();
+    }
 }
 
 impl<T: Element> Default for ButtonWidget<T> {

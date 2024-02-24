@@ -66,6 +66,19 @@ pub trait AnyWidget {
     fn destroy(&self, state: Box<dyn Any + 'static>);
 }
 
+impl<E: Element> Element for TypedId<E> {
+    type Widget = E::Widget;
+
+    fn make_state(self, _id: Id, _ctx: &mut Context) -> <Self::Widget as Widget>::State {
+        panic!("Cannot call Element::make_state() on a TypedId.")
+    }
+
+    #[inline]
+    fn make(self, _ctx: &mut Context) -> TypedId<Self> {
+        TypedId::new(self.raw())
+    }
+}
+
 impl<T: Widget> AnyWidget for T {
     #[inline]
     fn layout(&self, id: Id, ctx: &mut LayoutCtx, bounds: SizeConstraints) -> Size {
