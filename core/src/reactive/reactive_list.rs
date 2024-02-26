@@ -8,44 +8,44 @@ use std::{
 };
 
 use ahash::AHasher;
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 use nohash::{IntSet, IsEnabled};
 
 use crate::{widget::Element, TypedId, Context, Id, StateHandle};
 use super::event_emitter::{EventEmitter, EventHandler};
 
-pub trait ReactiveListHandler<T: UniqueKey>: EventHandler<ListOp<T>>
+pub trait ReactiveListHandler<T: HasUniqueKey>: EventHandler<ListOp<T>>
     where Self::State: ReactiveListHandlerState
 { }
 
 pub trait ReactiveListHandlerState {
-    type Item: ContainsId;
+    type Item: HasId;
 
     fn child_ids(&mut self) -> &mut SmallVec<[Self::Item; 8]>;
 }
 
-pub trait ContainsId: Default {
+pub trait HasId: Default {
     fn id(&self) -> Id;
     fn set_id(&mut self, id: Id);
 }
 
-pub trait UniqueKey {
+pub trait HasUniqueKey {
     type Key: Hash;
 
     fn key(&self) -> &Self::Key;
 }
 
-pub struct ReactiveList<T: UniqueKey> {
+pub struct ReactiveList<T: HasUniqueKey> {
     items: Rc<RefCell<State<T>>>,
     emitter: EventEmitter<ListOp<T>>
 }
 
-pub enum ListOp<T: UniqueKey> {
+pub enum ListOp<T: HasUniqueKey> {
     Init(ListRef<T>),
-    Diff(ListDiff<T>)
+    Changes(ListDiff<T>)
 }
 
-pub struct NewItems<'a, T: UniqueKey> {
+pub struct NewItems<'a, T: HasUniqueKey> {
     pub list: ListRef<T>,
     pub new_indexes: &'a SmallVec<[usize; 8]>
 }
@@ -55,7 +55,7 @@ pub struct ListSliceMut<'a, T>(RefMut<'a, State<T>>);
 
 pub struct ListRef<T>(Rc<RefCell<State<T>>>);
 
-pub struct ListDiff<T: UniqueKey> {
+pub struct ListDiff<T: HasUniqueKey> {
     list: ListRef<T>,
     diff: Diff
 }
@@ -85,7 +85,7 @@ struct State<T> {
     items_hashed: IntSet<DiffEntry>
 }
 
-impl<T: UniqueKey> ReactiveList<T> {
+impl<T: HasUniqueKey> ReactiveList<T> {
     #[inline]
     pub fn new() -> Self {
         Self::from_vec(Vec::new())
@@ -133,12 +133,40 @@ impl<T: UniqueKey> ReactiveList<T> {
         ListSliceMut(self.items.borrow_mut())
     }
 
+    pub fn push(&self, ctx: &mut Context, item: T) {
+        let mut hasher = AHasher::default();
+        item.key().hash(&mut hasher);
+
+        let mut state = self.items.borrow_mut();
+        state.items.push(item);
+
+        let index = state.items.len() - 1;
+        state.items_hashed.insert(DiffEntry {
+            index,
+            key: hasher.finish()
+        });
+
+        drop(state);
+
+        let diff = Diff {
+            added: smallvec![index],
+            ..Default::default()
+        };
+
+        let event = ListOp::Changes(ListDiff {
+            list: ListRef(Rc::clone(&self.items)),
+            diff
+        });
+
+        self.emitter.emit(ctx, &event);
+    }
+
     pub fn mutate(&self, ctx: &mut Context, f: impl FnOnce(&mut Vec<T>)) {
         let mut state = self.items.borrow_mut();
         f(&mut state.items);
 
         let diff = state.compute_diff();
-        let event = ListOp::Diff(ListDiff {
+        let event = ListOp::Changes(ListDiff {
             list: ListRef(Rc::clone(&self.items)),
             diff
         });
@@ -149,7 +177,41 @@ impl<T: UniqueKey> ReactiveList<T> {
     }
 }
 
-impl<T: UniqueKey> State<T> {
+impl<T: HasUniqueKey + Clone> ReactiveList<T> {
+    pub fn extend_from_slice(&mut self, ctx: &mut Context, slice: &[T]) {
+        let mut state = self.items.borrow_mut();
+        let start = state.items.len();
+
+        for (index, item) in slice.iter().enumerate() {
+            let mut hasher = AHasher::default();
+            item.key().hash(&mut hasher);
+
+            state.items_hashed.insert(DiffEntry {
+                index: start + index,
+                key: hasher.finish()
+            });
+        }
+
+        state.items.extend_from_slice(slice);
+        let new_len = state.items.len();
+
+        drop(state);
+
+        let diff = Diff {
+            added: (start..new_len).collect(),
+            ..Default::default()
+        };
+
+        let event = ListOp::Changes(ListDiff {
+            list: ListRef(Rc::clone(&self.items)),
+            diff
+        });
+
+        self.emitter.emit(ctx, &event);
+    }
+}
+
+impl<T: HasUniqueKey> State<T> {
     fn new(items: Vec<T>) -> Self {
         let mut state = Self {
             items,
@@ -215,7 +277,7 @@ impl<T: UniqueKey> State<T> {
     }
 }
 
-impl<T: UniqueKey> ListDiff<T> {
+impl<T: HasUniqueKey> ListDiff<T> {
     #[must_use = "Use the returned value to generate widgets for any new items."]
     pub fn apply<S: ReactiveListHandlerState + 'static>(
         &self,
@@ -286,7 +348,7 @@ impl<T: UniqueKey> ListDiff<T> {
     }
 }
 
-impl ContainsId for Id {
+impl HasId for Id {
     #[inline]
     fn id(&self) -> Id {
         *self
@@ -298,7 +360,7 @@ impl ContainsId for Id {
     }
 }
 
-impl<T, Item: UniqueKey> ReactiveListHandler<Item> for T
+impl<T, Item: HasUniqueKey> ReactiveListHandler<Item> for T
     where
         T: EventHandler<ListOp<Item>>,
         T::State: ReactiveListHandlerState { }
@@ -310,7 +372,7 @@ impl<T> ListRef<T> {
     }
 }
 
-impl<T: UniqueKey> Clone for ListRef<T> {
+impl<T: HasUniqueKey> Clone for ListRef<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self(Rc::clone(&self.0))
@@ -342,7 +404,7 @@ impl<'a, T> DerefMut for ListSliceMut<'a, T> {
     }
 }
 
-impl<T: UniqueKey> FromIterator<T> for ReactiveList<T> {
+impl<T: HasUniqueKey> FromIterator<T> for ReactiveList<T> {
     #[inline]
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let items = Vec::from_iter(iter);
@@ -351,7 +413,7 @@ impl<T: UniqueKey> FromIterator<T> for ReactiveList<T> {
     }
 }
 
-impl<T: UniqueKey> Clone for ReactiveList<T> {
+impl<T: HasUniqueKey> Clone for ReactiveList<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -361,14 +423,14 @@ impl<T: UniqueKey> Clone for ReactiveList<T> {
     }
 }
 
-impl<T: UniqueKey> From<Vec<T>> for ReactiveList<T> {
+impl<T: HasUniqueKey> From<Vec<T>> for ReactiveList<T> {
     #[inline]
     fn from(items: Vec<T>) -> Self {
         Self::from_vec(items)
     }
 }
 
-impl<T: UniqueKey + fmt::Debug> fmt::Debug for ReactiveList<T> {
+impl<T: HasUniqueKey + fmt::Debug> fmt::Debug for ReactiveList<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self.items.borrow().items.as_slice(), f)
@@ -395,7 +457,7 @@ impl IsEnabled for DiffEntry { }
 
 macro_rules! impl_unique_key {
     ($t:ty) => {
-        impl UniqueKey for $t {
+        impl HasUniqueKey for $t {
             type Key = Self;
 
             #[inline]

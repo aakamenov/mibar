@@ -6,7 +6,7 @@ use crate::{
     geometry::{Size, Rect},
     draw::{Quad, QuadStyle},
     reactive::{
-        reactive_list::{ReactiveList, ReactiveListHandlerState, ContainsId, UniqueKey, ListOp},
+        reactive_list::{ReactiveList, ReactiveListHandlerState, HasId, HasUniqueKey, ListOp},
         event_emitter::EventHandler
     },
     DrawCtx, LayoutCtx, Context, Event, Id, TypedId, StateHandle
@@ -33,7 +33,7 @@ pub struct StaticFlex<T: FlexElementTuple> {
     params: Flex
 }
 
-pub struct DynamicFlex<T: UniqueKey> {
+pub struct DynamicFlex<T: HasUniqueKey> {
     create: Rc<CreateChildFn<T>>,
     params: Flex
 }
@@ -93,7 +93,7 @@ impl Flex {
     }
 
     #[inline]
-    pub fn bind<T: UniqueKey + 'static>(
+    pub fn bind<T: HasUniqueKey + 'static>(
         self,
         ctx: &mut Context,
         list: &ReactiveList<T>,
@@ -178,7 +178,7 @@ impl<T: FlexElementTuple> Element for StaticFlex<T> {
     }
 }
 
-impl<T: UniqueKey + 'static> Element for DynamicFlex<T> {
+impl<T: HasUniqueKey + 'static> Element for DynamicFlex<T> {
     type Widget = FlexWidget<T>;
 
     fn make_state(self, _id: Id, _ctx: &mut Context) -> <Self::Widget as Widget>::State {
@@ -358,7 +358,7 @@ impl<T: 'static> Widget for FlexWidget<T> {
     }
 }
 
-impl<T: UniqueKey + 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
+impl<T: HasUniqueKey + 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
     fn handle(
         handle: StateHandle<Self::State>,
         ctx: &mut Context,
@@ -377,8 +377,7 @@ impl<T: UniqueKey + 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
                     ctx.tree[handle].children.push(result);
                 }
             }
-            ListOp::Diff(diff) => {
-                //println!("Before: {:?}", &ctx.tree[handle].children);
+            ListOp::Changes(diff) => {
                 let new = diff.apply(ctx, handle);
                 let items = new.list.as_slice(); 
                 let create_child = Rc::clone(&ctx.tree[handle].create_child);
@@ -392,8 +391,6 @@ impl<T: UniqueKey + 'static> EventHandler<ListOp<T>> for FlexWidget<T> {
 
                     ctx.tree[handle].children[index] = result;
                 }
-
-                //println!("After:  {:?}\n", &ctx.tree[handle].children);
             }
         }
     }
@@ -407,7 +404,7 @@ impl<T> ReactiveListHandlerState for State<T> {
     }
 }
 
-impl ContainsId for FlexChild {
+impl HasId for FlexChild {
     #[inline]
     fn id(&self) -> Id {
         self.id
@@ -419,7 +416,7 @@ impl ContainsId for FlexChild {
     }
 }
 
-impl<T: UniqueKey + 'static> TypedId<DynamicFlex<T>> {
+impl<T: HasUniqueKey + 'static> TypedId<DynamicFlex<T>> {
     #[inline]
     pub fn set_style(self, ctx: &mut Context, style: StyleFn) {
         ctx.tree[self].style = Some(style);

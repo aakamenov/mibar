@@ -8,7 +8,7 @@ use mibar_core::{
         ButtonState, Flex, Text, Button, Length, Element,
         Alignment, Container, container, button
     },
-    Context, Id, Theme, Color, QuadStyle, Font, ReactiveList, UniqueKey, run
+    Context, Id, Theme, Color, QuadStyle, Font, ReactiveList, HasUniqueKey, run
 };
 
 const BLUE: Color = Color::rgb(13, 110, 253);
@@ -24,7 +24,7 @@ struct Item {
     selected: bool
 }
 
-impl UniqueKey for Item {
+impl HasUniqueKey for Item {
     type Key = usize;
 
     #[inline]
@@ -144,7 +144,7 @@ fn item_controls(
                     let id = *count;
                     *count += 1;
 
-                    items.mutate(ctx, |items| items.push(Item { id, selected: false }))
+                    items.push(ctx, Item { id, selected: false });
                 })
                 .width(Length::Expand),
                 1f32
