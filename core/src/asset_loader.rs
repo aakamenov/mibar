@@ -8,21 +8,19 @@ use std::{
     sync::mpsc as std_mpsc
 };
 
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use tiny_skia::Pixmap;
 use ahash::AHasher;
 use nohash;
 
 use crate::ui::ValueSender;
 
-lazy_static! {
-    static ref LOADER_THREAD: std_mpsc::Sender<Job> = {
-        let (tx, rx) = std_mpsc::channel();
-        thread::spawn(|| start_resource_thread(rx));
+static LOADER_THREAD: Lazy<std_mpsc::Sender<Job>> = Lazy::new(|| {
+    let (tx, rx) = std_mpsc::channel();
+    thread::spawn(|| start_resource_thread(rx));
 
-        tx
-    };
-}
+    tx
+});
 
 pub type LoadResult = std::result::Result<Pixmap, AssetLoadError>;
 

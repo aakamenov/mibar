@@ -7,7 +7,9 @@ pub mod volume;
 pub mod keyboard_layout;
 pub mod sys_info;
 pub mod hyprland;
+pub mod tray;
 mod system_monitor;
+mod sender_key;
 
 use std::ops::Deref;
 

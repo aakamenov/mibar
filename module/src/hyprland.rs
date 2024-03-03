@@ -1,7 +1,7 @@
 use std::{
     sync::{RwLock, Mutex, atomic::{AtomicUsize, Ordering}},
-    collections::{HashMap, hash_map::DefaultHasher},
-    hash::{Hasher, Hash},
+    collections::HashMap,
+    hash::Hasher,
     env::{self, VarError},
     str
 };
@@ -15,7 +15,7 @@ use tokio::{
     task::JoinHandle
 };
 
-use crate::StaticPtr;
+use crate::{sender_key::SenderKey, StaticPtr};
 
 static SUB_COUNT: AtomicUsize = AtomicUsize::new(0);
 static HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None); 
@@ -160,9 +160,6 @@ pub struct KeyboardSubscriber {
     sender: ValueSender<KeyboardLayoutChanged>,
     device: &'static str
 }
-
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-struct SenderKey(u64);
 
 enum SocketType {
     Read,
@@ -660,16 +657,5 @@ impl<T> Drop for SubscriptionToken<T> {
             let mut map = self.handle.write().unwrap();
             map.remove(&self.key);
         }
-    }
-}
-
-impl SenderKey {
-    #[inline]
-    fn new<T: Send>(window_id: WindowId, sender: &ValueSender<T>) -> Self {
-        let mut hasher = DefaultHasher::new();
-        window_id.hash(&mut hasher);
-        sender.hash(&mut hasher);
-
-        Self(hasher.finish())
     }
 }
