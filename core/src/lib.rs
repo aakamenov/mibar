@@ -1,5 +1,6 @@
 pub mod widget;
 pub mod reactive;
+pub mod image;
 mod widget_tree;
 mod ui;
 mod event_queue;
@@ -12,7 +13,6 @@ mod color;
 mod draw;
 mod gradient;
 mod client;
-mod asset_loader;
 
 pub use client::run;
 pub use ui::*;

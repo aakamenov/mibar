@@ -1,10 +1,9 @@
 mod text;
-mod image_cache;
 
-use std::{mem, ops::{Deref, DerefMut}};
+use std::mem;
 
 use tiny_skia::{
-    PixmapMut, PathBuilder, FillRule, Transform,
+    PixmapMut, PixmapRef, PathBuilder, FillRule, Transform,
     Paint, Shader, Mask, Stroke, PixmapPaint,
     FilterQuality, BlendMode
 };
@@ -13,22 +12,15 @@ use crate::{
     geometry::{Rect, Point, Size},
     color::Color,
     draw::{Quad, Circle, BorderRadius, Background, TextInfo},
-    asset_loader::AssetId
+    image
 };
-
-use image_cache::ImageCache;
 
 pub struct Renderer {
     pub(crate) text_renderer: text::Renderer,
-    // Box needed because of ImageCacheHandle.
-    pub(crate) image_cache: Box<ImageCache>,
     scale_factor: f32,
     mask: Mask,
     commands: Vec<Command>
 }
-
-#[derive(Clone, Copy, Debug)]
-pub struct ImageCacheHandle(*mut ImageCache);
 
 #[derive(Debug)]
 enum Command {
@@ -59,24 +51,8 @@ enum Primitive {
         rect: Rect
     },
     Image {
-        id: AssetId,
+        image: image::Pixmap,
         rect: Rect
-    }
-}
-
-impl Deref for ImageCacheHandle {
-    type Target = ImageCache;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        unsafe { &(*self.0) }
-    }
-}
-
-impl DerefMut for ImageCacheHandle {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut (*self.0) }
     }
 }
 
@@ -85,7 +61,6 @@ impl Renderer {
     pub(crate) fn new() -> Self {
         Self {
             text_renderer: text::Renderer::new(),
-            image_cache: Box::new(ImageCache::new()),
             scale_factor: 1f32,
             mask: Mask::new(1, 1).unwrap(),
             commands: Vec::with_capacity(64)
@@ -132,6 +107,11 @@ impl Renderer {
     }
 
     #[inline]
+    pub fn render_image(&mut self, image: image::Pixmap, rect: Rect) {
+        self.commands.push(Command::Draw(Primitive::Image { image, rect }));
+    }
+
+    #[inline]
     pub fn push_clip(&mut self, clip: Rect) {
         self.commands.push(Command::Clip(clip));
     }
@@ -150,16 +130,6 @@ impl Renderer {
     pub(crate) fn set_scale_factor(&mut self, scale_factor: f32) {
         self.scale_factor = scale_factor;
         self.text_renderer.invalidate();
-    }
-
-    #[inline]
-    pub(crate) fn image_cache_handle(&mut self) -> ImageCacheHandle {
-        ImageCacheHandle(self.image_cache.as_mut())
-    }
-
-    #[inline]
-    pub(crate) fn render_image(&mut self, id: AssetId, rect: Rect) {
-        self.commands.push(Command::Draw(Primitive::Image { id, rect }));
     }
 
     pub(crate) fn render(&mut self, pixmap: &mut PixmapMut) {
@@ -304,23 +274,27 @@ impl Renderer {
                                 );
                             }
                         }
-                        Primitive::Image { id, rect } => {
-                            if let Some(image) = self.image_cache.get(id) {
-                                let paint = PixmapPaint {
-                                    opacity: 1f32,
-                                    blend_mode: BlendMode::SourceOver,
-                                    quality: FilterQuality::Nearest
-                                };
+                        Primitive::Image { image, rect } => {
+                            let paint = PixmapPaint {
+                                opacity: 1f32,
+                                blend_mode: BlendMode::SourceOver,
+                                quality: FilterQuality::Nearest
+                            };
 
-                                pixmap.draw_pixmap(
-                                    rect.x as i32,
-                                    rect.y as i32,
-                                    image,
-                                    &paint,
-                                    transform,
-                                    mask
-                                );
-                            }
+                            let image = PixmapRef::from_bytes(
+                                image.pixels(),
+                                image.width(),
+                                image.height()
+                            ).unwrap();
+
+                            pixmap.draw_pixmap(
+                                rect.x as i32,
+                                rect.y as i32,
+                                image,
+                                &paint,
+                                transform,
+                                mask
+                            );
                         }
                     }
                 }

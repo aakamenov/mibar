@@ -1,13 +1,19 @@
 use crate::{
-    asset_loader::{AssetSource, AssetDataSource, AssetId, LoadResult},
-    renderer::ImageCacheHandle,
+    image::{self, Pixmap, Data, Job, Resize},
     DrawCtx, LayoutCtx, Context, Size, Rect, StateHandle, Id, TypedId
 };
 use super::{Element, Widget, SizeConstraints};
 
+#[derive(Clone, Debug)]
+pub enum Type {
+    Data(Data),
+    Pixmap(Pixmap)
+}
+
 #[derive(Debug)]
 pub struct Image {
-    source: AssetSource
+    ty: Type,
+    resize: Option<Resize>
 }
 
 #[derive(Debug, Default)]
@@ -15,14 +21,43 @@ pub struct ImageWidget;
 
 #[derive(Debug)]
 pub struct State {
-    id: AssetId,
-    handle: ImageCacheHandle
+    pixmap: Option<Pixmap>
 }
 
 impl Image {
     #[inline]
-    pub fn png(source: impl Into<AssetDataSource>) -> Self {
-        Self { source: AssetSource::Image(source.into()) }
+    pub fn png(data: impl Into<Data>) -> Self {
+        Self {
+            ty: Type::Data(data.into()),
+            resize: None
+        }
+    }
+
+    #[inline]
+    pub fn rgba(pixels: Vec<u8>, width: u32, height: u32) -> Self {
+        Self {
+            resize: None,
+            ty: Type::Data(Data::Rgba {
+                width,
+                height,
+                pixels
+            })
+        }
+    }
+
+    #[inline]
+    pub fn from_pixmap(pixmap: Pixmap) -> Self {
+        Self {
+            ty: Type::Pixmap(pixmap),
+            resize: None            
+        }
+    }
+
+    #[inline]
+    pub fn resize(mut self, resize: Resize) -> Self {
+        self.resize = Some(resize);
+
+        self
     }
 }
 
@@ -30,14 +65,23 @@ impl Element for Image {
     type Widget = ImageWidget;
 
     fn make_state(self, widget_id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
-        let id = AssetId::new(&self.source);
-        let mut handle = ctx.ui.image_cache_handle;
+        match self.ty {
+            Type::Data(data) => {
+                let sender = ctx.ui.value_sender(widget_id);
+                image::load(Job { sender, data, resize: self.resize });
 
-        if !handle.increase_ref_count(id) {
-            ctx.load_asset(widget_id, self.source);
+                State { pixmap: None }
+            }
+            Type::Pixmap(pixmap) => {
+                State {
+                    pixmap: if let Some(resize) = self.resize {
+                        pixmap.resize(resize)
+                    } else {
+                        Some(pixmap)
+                    }
+                }
+            }
         }
-
-        State { id, handle }
     }
 }
 
@@ -51,9 +95,13 @@ impl Widget for ImageWidget {
     ) -> Size {
         let state = &ctx.tree[handle];
 
-        match state.handle.size(state.id) {
-            Some(size) => bounds.constrain(size),
-            None => Size::ZERO
+        match &state.pixmap {
+            Some(pixmap) => {
+                let size = Size::new(pixmap.width() as f32, pixmap.height() as f32);
+
+                bounds.constrain(size)
+            }
+            None => bounds.min
         }
     }
 
@@ -62,65 +110,67 @@ impl Widget for ImageWidget {
         ctx: &mut Context,
         data: Box<dyn std::any::Any>
     ) {
-        let result = data.downcast::<LoadResult>().unwrap();
-        let state = &mut ctx.tree[handle];
+        let result = data.downcast::<Result<Pixmap, image::Error>>().unwrap();
 
         match *result {
-            Ok(image) => {
-                state.handle.allocate(state.id, image);
+            Ok(pixmap) => {
+                ctx.tree[handle].pixmap = Some(pixmap);
                 ctx.ui.request_layout();
             }
-            Err(err) => {
-                state.handle.decrease_ref_count(state.id);
-                eprintln!("Error while loading image: {}", err);
-            }
+            Err(err) => eprintln!("Error while loading image: {}", err)
         }
     }
 
     fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, layout: Rect) {
-        let state = &ctx.tree[handle];
-
-        let Some(size) = state.handle.size(state.id) else {
+        let Some(pixmap) = ctx.tree[handle].pixmap.clone() else {
             return;
         };
 
         let available_size = layout.size();
+        let size = Size::new(pixmap.width() as f32, pixmap.height() as f32);
 
         if size.width > available_size.width || size.height > available_size.height {
             ctx.renderer.push_clip(layout);
-            ctx.renderer.render_image(state.id, layout);
+            ctx.renderer.render_image(pixmap, layout);
             ctx.renderer.pop_clip();
         } else {
-            ctx.renderer.render_image(state.id, layout);
+            ctx.renderer.render_image(pixmap, layout);
         }
-    }
-
-    fn destroy(mut state: Self::State) {
-        state.handle.decrease_ref_count(state.id)
     }
 }
 
 impl TypedId<Image> {
-    pub fn change_source(
+    pub fn change_image(
         self,
         ctx: &mut Context,
-        source: impl Into<AssetDataSource>
+        image: impl Into<Type>
     ) {
-        let source = AssetSource::Image(source.into());
+        let image = image.into();
         let state = &mut ctx.tree[self];
-        let id = AssetId::new(&source);
 
-        if id == state.id {
-            return;
+        match image {
+            Type::Pixmap(pixmap) => {
+                state.pixmap = Some(pixmap);
+                ctx.ui.request_layout();
+            }
+            Type::Data(data) => {
+                let sender = ctx.ui.value_sender(self);
+                image::load(Job { sender, data, resize: None });
+            }
         }
+    }
+}
 
-        state.handle.decrease_ref_count(state.id);
-        state.id = id;
+impl From<Data> for Type {
+    #[inline]
+    fn from(value: Data) -> Self {
+        Self::Data(value)
+    }
+}
 
-        if !state.handle.increase_ref_count(id) {
-            ctx.load_asset(self, source);
-        } else {
-            ctx.ui.request_layout();
-        }
+impl From<Pixmap> for Type {
+    #[inline]
+    fn from(value: Pixmap) -> Self {
+        Self::Pixmap(value)
     }
 }

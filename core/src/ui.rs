@@ -20,14 +20,13 @@ use crate::{
     event_queue::{EventQueue, EventType},
     widget::{Element, Widget, AnyWidget, SizeConstraints},
     theme::Theme,
-    renderer::{Renderer, ImageCacheHandle},
+    renderer::Renderer,
     wayland::{
         popup::{self, PopupWindowConfig},
         WindowEvent, MouseEvent, WindowConfig
     },
     client::{UiRequest, WindowId, WindowAction},
     window::Window,
-    asset_loader::{self, AssetSource},
     task::AsyncTask
 };
 
@@ -75,7 +74,6 @@ pub enum Event {
 }
 
 pub struct UiCtx {
-    pub(crate) image_cache_handle: ImageCacheHandle,
     // Each Ui keeps a local copy of the current Theme. Whenever the theme
     // is mutated, the Ui sends a request to the client which then propagates
     // the changes to all the other windows. This may be more expensive than
@@ -126,14 +124,12 @@ impl Ui {
         }: UiConfig,
         task_send: Sender<TaskResult>
     ) -> Self {
-        let mut renderer = Renderer::new();
         let mut tree = WidgetTree::new();
         let mut alloc = Bump::new();
 
         let mut ctx = UiCtx {
             theme,
             mouse_pos: None,
-            image_cache_handle: renderer.image_cache_handle(),
             needs_redraw: false,
             needs_layout: false,
             rt_handle,
@@ -159,7 +155,7 @@ impl Ui {
 
         Self {
             ctx,
-            renderer,
+            renderer: Renderer::new(),
             alloc,
             tree,
             root: root.into(),
@@ -521,20 +517,6 @@ impl<'a> Context<'a> {
         self.ui.client_send.send(
             UiRequest { id, action: WindowAction::Close }
         ).unwrap();
-    }
-
-    pub(crate) fn load_asset(&self, id: impl Into<Id>, source: impl Into<AssetSource>) {
-        let sender = ValueSender::new(
-            id.into().0,
-            self.ui.task_send.clone()
-        );
-
-        let job = asset_loader::Job {
-            sender,
-            source: source.into()
-        };
-
-        asset_loader::load(job);
     }
 
     fn execute_events(&mut self) {
