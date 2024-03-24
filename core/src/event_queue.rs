@@ -43,8 +43,8 @@ impl<'a> EventQueue<'a> {
     }
 
     #[inline]
-    pub fn destroy(&self, id: Id) {
-        self.destroy_many([id]);
+    pub fn destroy(&self, id: impl Into<Id>) {
+        self.destroy_many([id.into()]);
     }
 
     #[inline]

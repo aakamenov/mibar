@@ -187,7 +187,7 @@ impl<W: WaylandWindow + 'static> WaylandWindowBase<W> {
                     UiEvent::Task(result) => self.state.ui.task_result(result),
                     UiEvent::Window(event) => match event {
                         WindowEvent::ScaleFactor(scale_factor) =>
-                            self.state.ui.set_scale_factor(scale_factor),
+                            self.state.ui.event(Event::ScaleFactorChanged(scale_factor)),
                         WindowEvent::Resize(size) =>
                             self.state.ui.set_size(Size {
                                 width: size.0 as f32,

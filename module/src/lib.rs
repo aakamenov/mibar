@@ -7,6 +7,7 @@ pub mod volume;
 pub mod keyboard_layout;
 pub mod sys_info;
 pub mod hyprland;
+#[cfg(feature = "tray")]
 pub mod tray;
 mod system_monitor;
 mod sender_key;

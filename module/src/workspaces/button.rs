@@ -144,7 +144,8 @@ impl Widget for ButtonWidget {
                     state.is_active = false;
                 }
                 _ => { }
-            }
+            },
+            _ => { }
         }
     }
 

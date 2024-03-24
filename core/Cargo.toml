@@ -3,13 +3,16 @@ name = "mibar-core"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+svg = ["dep:resvg"]
+
 [dependencies]
 tokio.workspace = true
 smallvec.workspace = true
 once_cell.workspace = true
 ahash.workspace = true
 smithay-client-toolkit = "0.18.0"
-tiny-skia = "0.11.1"
+tiny-skia = "0.11.4"
 bumpalo = "3.14.0"
 nohash = "0.2.0"
 slotmap = "1.0.7"
@@ -17,3 +20,4 @@ cosmic-text = "0.9.0"
 lru = { version = "0.11.0", default-features = false }
 resize = { version = "0.8.4", default-features = false, features = ["std"] }
 rgb = { version = "0.8.36", default-features = false }
+resvg = { version = "=0.40.0", default-features = false, features = ["memmap-fonts"], optional = true }

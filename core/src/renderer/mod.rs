@@ -17,7 +17,6 @@ use crate::{
 
 pub struct Renderer {
     pub(crate) text_renderer: text::Renderer,
-    scale_factor: f32,
     mask: Mask,
     commands: Vec<Command>
 }
@@ -61,7 +60,6 @@ impl Renderer {
     pub(crate) fn new() -> Self {
         Self {
             text_renderer: text::Renderer::new(),
-            scale_factor: 1f32,
             mask: Mask::new(1, 1).unwrap(),
             commands: Vec::with_capacity(64)
         }
@@ -121,18 +119,7 @@ impl Renderer {
         self.commands.push(Command::PopClip);
     }
 
-    #[inline]
-    pub(crate) fn scale_factor(&mut self) -> f32 {
-        self.scale_factor
-    }
-    
-    #[inline]
-    pub(crate) fn set_scale_factor(&mut self, scale_factor: f32) {
-        self.scale_factor = scale_factor;
-        self.text_renderer.invalidate();
-    }
-
-    pub(crate) fn render(&mut self, pixmap: &mut PixmapMut) {
+    pub(crate) fn render(&mut self, pixmap: &mut PixmapMut, scale_factor: f32) {
         if self.mask.width() != pixmap.width() ||
             self.mask.height() != pixmap.height()
         {
@@ -146,8 +133,8 @@ impl Renderer {
         let mut builder = PathBuilder::new();
 
         let transform = Transform::from_scale(
-            self.scale_factor,
-            self.scale_factor
+            scale_factor,
+            scale_factor
         );
 
         let mut commands = mem::take(&mut self.commands);
@@ -255,7 +242,7 @@ impl Renderer {
                             if let Some(texture) = self.text_renderer.get_texture(
                                 key,
                                 color,
-                                self.scale_factor
+                                scale_factor
                             ) {
                                 let paint = PixmapPaint {
                                     opacity: 1f32,
@@ -264,8 +251,8 @@ impl Renderer {
                                 };
                                 
                                 pixmap.draw_pixmap(
-                                    (rect.x * self.scale_factor) as i32,
-                                    (rect.y * self.scale_factor) as i32,
+                                    (rect.x * scale_factor) as i32,
+                                    (rect.y * scale_factor) as i32,
                                     texture,
                                     &paint,
                                     // Glyph images are scaled by cosmic-text
@@ -275,21 +262,30 @@ impl Renderer {
                             }
                         }
                         Primitive::Image { image, rect } => {
+                            let scale = image.scale();
+                            let transform = if scale == scale_factor {
+                                Transform::identity()
+                            } else {
+                                let scale = scale_factor / scale;
+                                Transform::from_scale(scale, scale)
+                            };
+
+                            let size = image.physical_size();
+                            let image = PixmapRef::from_bytes(
+                                image.pixels(),
+                                size.0,
+                                size.1
+                            ).unwrap();
+
                             let paint = PixmapPaint {
                                 opacity: 1f32,
                                 blend_mode: BlendMode::SourceOver,
                                 quality: FilterQuality::Nearest
                             };
 
-                            let image = PixmapRef::from_bytes(
-                                image.pixels(),
-                                image.width(),
-                                image.height()
-                            ).unwrap();
-
                             pixmap.draw_pixmap(
-                                rect.x as i32,
-                                rect.y as i32,
+                                (rect.x * scale) as i32,
+                                (rect.y * scale) as i32,
                                 image,
                                 &paint,
                                 transform,

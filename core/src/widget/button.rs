@@ -184,6 +184,7 @@ impl<T: Element + 'static> Widget for ButtonWidget<T> {
                 }
                 _ => { }
             }
+            _ => { }
         }
     }
 

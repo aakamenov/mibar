@@ -9,7 +9,8 @@ use mibar::{
         cpu::Cpu,
         ram::Ram,
         volume::{pulseaudio, PulseAudioVolume},
-        keyboard_layout::KeyboardLayout
+        keyboard_layout::KeyboardLayout,
+        tray::Tray
     },
     widget::{
         button::{self, ButtonState},
@@ -123,6 +124,7 @@ fn build(ctx: &mut Context) -> Id {
                     (Battery::new(BATTERY_DEVICE, Duration::from_secs(30), battery_style), 0f32),
                     (Cpu::new(), 0f32),
                     (Ram::new(), 0f32),
+                    (Tray::new(32), 0f32),
                     (boot_menu_button(handle), 0f32)
                 )),
                 1f32

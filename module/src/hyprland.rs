@@ -1,7 +1,6 @@
 use std::{
     sync::{RwLock, Mutex, atomic::{AtomicUsize, Ordering}},
     collections::HashMap,
-    hash::Hasher,
     env::{self, VarError},
     str
 };

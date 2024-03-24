@@ -19,6 +19,10 @@ members = [
 version = "0.1.0"
 edition = "2021"
 
+[features]
+tray = ["mibar-module/tray"]
+svg = ["mibar-core/svg"]
+
 [workspace.dependencies]
 mibar = { path = "." }
 mibar-core = { path = "core" }

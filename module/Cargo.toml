@@ -3,6 +3,10 @@ name = "mibar-module"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+tray = ["zbus", "mibar-core/svg"]
+zbus = ["dep:zbus"]
+
 [dependencies]
 mibar-core.workspace = true
 tokio.workspace = true
@@ -10,4 +14,4 @@ smallvec.workspace = true
 ahash.workspace = true
 once_cell.workspace = true
 pulse = { package = "libpulse-binding", version = "2.0" }
-zbus = { version = "4.1.2", default-features = false, features = ["tokio"] }
+zbus = { version = "4.1.2", default-features = false, features = ["tokio"], optional = true }

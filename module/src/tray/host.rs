@@ -4,8 +4,7 @@ use std::{
     time::Duration,
     hash::{Hash, Hasher},
     path::Path,
-    process,
-    io
+    process
 };
 
 use zbus::{
@@ -23,7 +22,11 @@ use tokio::{
     time::sleep,
     fs
 };
-use mibar_core::{window::WindowId, ValueSender};
+use mibar_core::{
+    window::WindowId,
+    image::png,
+    ValueSender
+};
 use once_cell::sync::Lazy;
 use ahash::AHasher;
 
@@ -53,7 +56,7 @@ pub struct SniId(u64);
 pub enum Event {
     New {
         id: SniId,
-        icon_data: Option<Vec<u8>>
+        icon: Option<png::Data>
     },
     Remove(SniId),
     Crash
@@ -198,8 +201,7 @@ async fn create_sni(
             let path = Path::new(&icon_path).to_path_buf().join(icon_name);
 
             match fs::read(path).await {
-                Ok(data) => Some(data),
-                Err(err) if matches!(err.kind(), io::ErrorKind::NotFound) => None,
+                Ok(data) => Some(png::Data::Bytes(data.into())),
                 Err(err) => {
                     eprintln!("Tray: error loading icon: {err}");
 
@@ -210,12 +212,21 @@ async fn create_sni(
             None
         };
 
+        let mut icon_theme_signal = item.receive_icon_name_changed().await;
+
         // Visualizations are encouraged to prefer icon names over icon pixmaps if both are available.
-        let icon_data = icon_data.or(
-            icon_pixmaps.map(|mut x| x.pop()).map(|x| x.map(|x| x.2)).flatten()
+        let icon = icon_data.or(
+            // Some apps send empty pixmaps so we need to filter those.
+            icon_pixmaps.map(|mut x| x.pop())
+                .map(|x| x.map(|x| png::Data::Rgba {
+                    width: x.0 as u32,
+                    height: x.1 as u32,
+                    pixels: x.2
+                }))
+                .flatten()
         );
 
-        send(Event::New { id, icon_data });
+        send(Event::New { id, icon });
 
         loop {
             tokio::select! {
@@ -224,8 +235,13 @@ async fn create_sni(
                 }
                 Some(owner) = exit_signal.next() => {
                     if owner.is_none() {
+                        send(Event::Remove(id));
+
                         break;
                     }
+                }
+                Some(icon_theme) = icon_theme_signal.next() => {
+                    println!("new icon theme: {:?}", icon_theme.get().await);
                 }
             }
         }

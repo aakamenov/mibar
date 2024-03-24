@@ -1,12 +1,19 @@
 use crate::{
-    image::{self, Pixmap, Data, Job, Resize},
-    DrawCtx, LayoutCtx, Context, Size, Rect, StateHandle, Id, TypedId
+    image::{self, Pixmap, Job, Resize, Request, png},
+    DrawCtx, LayoutCtx, Context, Size, Rect,
+    StateHandle, Id, TypedId
 };
+
+#[cfg(feature = "svg")]
+use crate::image::svg;
+
 use super::{Element, Widget, SizeConstraints};
 
 #[derive(Clone, Debug)]
 pub enum Type {
-    Data(Data),
+    Png(png::Data),
+    #[cfg(feature = "svg")]
+    Svg(svg::Data),
     Pixmap(Pixmap)
 }
 
@@ -21,14 +28,25 @@ pub struct ImageWidget;
 
 #[derive(Debug)]
 pub struct State {
-    pixmap: Option<Pixmap>
+    pixmap: Option<Pixmap>,
+    #[cfg(feature = "svg")]
+    svg: Option<(svg::Data, Option<Resize>)>
 }
 
 impl Image {
     #[inline]
-    pub fn png(data: impl Into<Data>) -> Self {
+    pub fn png(data: impl Into<png::Data>) -> Self {
         Self {
-            ty: Type::Data(data.into()),
+            ty: Type::Png(data.into()),
+            resize: None
+        }
+    }
+
+    #[inline]
+    #[cfg(feature = "svg")]
+    pub fn svg(data: impl Into<svg::Data>) -> Self {
+        Self {
+            ty: Type::Svg(data.into()),
             resize: None
         }
     }
@@ -37,7 +55,7 @@ impl Image {
     pub fn rgba(pixels: Vec<u8>, width: u32, height: u32) -> Self {
         Self {
             resize: None,
-            ty: Type::Data(Data::Rgba {
+            ty: Type::Png(png::Data::Rgba {
                 width,
                 height,
                 pixels
@@ -66,20 +84,46 @@ impl Element for Image {
 
     fn make_state(self, widget_id: Id, ctx: &mut Context) -> <Self::Widget as Widget>::State {
         match self.ty {
-            Type::Data(data) => {
+            Type::Png(data) => {
                 let sender = ctx.ui.value_sender(widget_id);
-                image::load(Job { sender, data, resize: self.resize });
+                image::load(Job {
+                    sender,
+                    request: Request::Png(data),
+                    resize: self.resize
+                });
 
-                State { pixmap: None }
+                #[cfg(feature = "svg")]
+                return State { pixmap: None, svg: None };
+
+                #[cfg(not(feature = "svg"))]
+                return State { pixmap: None };
+            }
+            #[cfg(feature = "svg")]
+            Type::Svg(data) => {
+                let sender = ctx.ui.value_sender(widget_id);
+                image::load(Job {
+                    sender,
+                    request: Request::Svg {
+                        data: data.clone(),
+                        scale: ctx.ui.scale_factor()
+                    },
+                    resize: self.resize
+                });
+
+                State { pixmap: None, svg: Some((data, self.resize)) }
             }
             Type::Pixmap(pixmap) => {
-                State {
-                    pixmap: if let Some(resize) = self.resize {
-                        pixmap.resize(resize)
-                    } else {
-                        Some(pixmap)
-                    }
-                }
+                let pixmap = if let Some(resize) = self.resize {
+                    pixmap.resize(resize)
+                } else {
+                    Some(pixmap)
+                };
+
+                #[cfg(feature = "svg")]
+                return State { pixmap, svg: None };
+
+                #[cfg(not(feature = "svg"))]
+                return State { pixmap };
             }
         }
     }
@@ -97,7 +141,8 @@ impl Widget for ImageWidget {
 
         match &state.pixmap {
             Some(pixmap) => {
-                let size = Size::new(pixmap.width() as f32, pixmap.height() as f32);
+                let size = pixmap.logical_size();
+                let size = Size::new(size.0 as f32, size.1 as f32);
 
                 bounds.constrain(size)
             }
@@ -121,13 +166,36 @@ impl Widget for ImageWidget {
         }
     }
 
+    #[cfg(feature = "svg")]
+    fn event(handle: StateHandle<Self::State>, ctx: &mut Context, event: &crate::Event) {
+        let crate::Event::ScaleFactorChanged(scale_factor) = event else {
+            return;
+        };
+
+        let state = &mut ctx.tree[handle];
+        if let Some((data, resize)) = state.svg.clone() {
+            let sender = ctx.ui.value_sender(handle);
+            image::load(Job {
+                sender,
+                request: Request::Svg {
+                    data,
+                    scale: *scale_factor
+                },
+                resize
+            });
+        }
+    }
+
     fn draw(handle: StateHandle<Self::State>, ctx: &mut DrawCtx, layout: Rect) {
-        let Some(pixmap) = ctx.tree[handle].pixmap.clone() else {
+        let state = &ctx.tree[handle];
+
+        let Some(pixmap) = state.pixmap.clone() else {
             return;
         };
 
         let available_size = layout.size();
-        let size = Size::new(pixmap.width() as f32, pixmap.height() as f32);
+        let size = pixmap.logical_size();
+        let size = Size::new(size.0 as f32, size.1 as f32);
 
         if size.width > available_size.width || size.height > available_size.height {
             ctx.renderer.push_clip(layout);
@@ -143,7 +211,8 @@ impl TypedId<Image> {
     pub fn change_image(
         self,
         ctx: &mut Context,
-        image: impl Into<Type>
+        image: impl Into<Type>,
+        resize: Option<Resize>
     ) {
         let image = image.into();
         let state = &mut ctx.tree[self];
@@ -153,18 +222,44 @@ impl TypedId<Image> {
                 state.pixmap = Some(pixmap);
                 ctx.ui.request_layout();
             }
-            Type::Data(data) => {
+            Type::Png(data) => {
                 let sender = ctx.ui.value_sender(self);
-                image::load(Job { sender, data, resize: None });
+                image::load(Job {
+                    sender,
+                    request: Request::Png(data),
+                    resize
+                });
+            }
+            #[cfg(feature = "svg")]
+            Type::Svg(data) => {
+                state.svg = Some((data.clone(), resize));
+
+                let sender = ctx.ui.value_sender(self);
+                image::load(Job {
+                    sender,
+                    request: Request::Svg {
+                        data,
+                        scale: ctx.ui.scale_factor()
+                    },
+                    resize
+                });
             }
         }
     }
 }
 
-impl From<Data> for Type {
+impl From<png::Data> for Type {
     #[inline]
-    fn from(value: Data) -> Self {
-        Self::Data(value)
+    fn from(value: png::Data) -> Self {
+        Self::Png(value)
+    }
+}
+
+#[cfg(feature = "svg")]
+impl From<svg::Data> for Type {
+    #[inline]
+    fn from(value: svg::Data) -> Self {
+        Self::Svg(value)
     }
 }
 

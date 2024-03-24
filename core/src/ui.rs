@@ -70,7 +70,8 @@ pub struct DrawCtx<'a> {
 
 #[derive(Debug)]
 pub enum Event {
-    Mouse(MouseEvent)
+    Mouse(MouseEvent),
+    ScaleFactorChanged(f32)
 }
 
 pub struct UiCtx {
@@ -87,7 +88,8 @@ pub struct UiCtx {
     rt_handle: runtime::Handle,
     task_send: Sender<TaskResult>,
     client_send: UnboundedSender<UiRequest>,
-    window_id: WindowId
+    window_id: WindowId,
+    scale_factor: f32
 }
 
 #[derive(Debug)]
@@ -135,7 +137,8 @@ impl Ui {
             rt_handle,
             task_send,
             client_send,
-            window_id
+            window_id,
+            scale_factor: 1f32
         };
 
         let buffer = RefCell::new(Vec::with_capacity(8));
@@ -199,6 +202,13 @@ impl Ui {
                 self.ctx.mouse_pos = Some(pos),
             Event::Mouse(MouseEvent::LeaveWindow) =>
                 self.ctx.mouse_pos = None,
+            Event::ScaleFactorChanged(scale_factor) => {
+                if self.ctx.scale_factor != scale_factor {
+                    self.ctx.scale_factor = scale_factor;
+                    self.renderer.text_renderer.invalidate();
+                    self.ctx.needs_redraw = true;
+                }
+            }
             _ => { }
         }
 
@@ -257,7 +267,7 @@ impl Ui {
         self.ctx.needs_redraw = false;
         self.ctx.needs_layout = false;
 
-        self.renderer.render(pixmap);
+        self.renderer.render(pixmap, self.ctx.scale_factor);
     }
 
     pub fn destroy(mut self) {
@@ -267,14 +277,6 @@ impl Ui {
     #[inline]
     pub fn needs_redraw(&self) -> bool {
         self.ctx.needs_redraw
-    }
-
-    #[inline]
-    pub fn set_scale_factor(&mut self, scale_factor: f32) {
-        if self.renderer.scale_factor() != scale_factor {
-            self.renderer.set_scale_factor(scale_factor);
-            self.ctx.needs_redraw = true;
-        }
     }
 
     fn layout_impl(&mut self, constraints: SizeConstraints) -> Size {
@@ -329,6 +331,11 @@ impl UiCtx {
     pub fn request_layout(&mut self) {
         self.needs_layout = true;
         self.needs_redraw = true;
+    }
+
+    #[inline]
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
     }
 
     /// `None` means the mouse is currently outside the window.
@@ -531,8 +538,12 @@ impl<'a> Context<'a> {
                     unsafe { action.invoke(self); }
                     events.extend(self.event_queue.buffer.borrow_mut().drain(..).rev());
                 }
-                EventType::Destroy(ids) => for id in ids {
-                    self.destroy_child(id)
+                EventType::Destroy(ids) => {
+                    self.ui.request_layout();
+
+                    for id in ids {
+                        self.destroy_child(id);
+                    }
                 }
             }
         }
